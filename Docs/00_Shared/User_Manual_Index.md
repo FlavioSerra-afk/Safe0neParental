@@ -16,9 +16,10 @@ This is the **user-facing** manual for implemented Safe0ne functionality.
 6. `05_Policies_WebSafety.md`
 7. `06_Location_And_Geofences.md`
 8. `07_Alerts_And_Inbox.md`
-9. `08_Reports.md`
-10. `09_DevTools_And_SelfTests.md`
-11. `10_Troubleshooting.md`
-12. `Appendix_Glossary.md`
+9. `11_Audit_Log.md`
+10. `08_Reports.md`
+11. `09_DevTools_And_SelfTests.md`
+12. `10_Troubleshooting.md`
+13. `Appendix_Glossary.md`
 
 > Note: Pairing/provisioning is documented as **planned** until the flow is implemented.
