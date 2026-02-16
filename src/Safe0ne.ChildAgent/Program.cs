@@ -22,6 +22,9 @@ builder.Services.AddHttpClient("ControlPlane", client =>
 
 builder.Services.AddHostedService<HeartbeatWorker>();
 
+// K1: Pairing enrollment helper (kid enters pairing code locally).
+builder.Services.AddSingleton<Safe0ne.ChildAgent.Pairing.EnrollmentService>();
+
 // K8: Child-initiated requests (offline outbox + retry)
 builder.Services.AddSingleton<AccessRequestQueue>();
 

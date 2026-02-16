@@ -5,6 +5,7 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Safe0ne.Shared.Contracts;
 using Safe0ne.ChildAgent.Requests;
+using Safe0ne.ChildAgent.Pairing;
 
 namespace Safe0ne.ChildAgent.ChildUx;
 
@@ -18,16 +19,18 @@ public sealed class ChildUxServer
     private readonly ChildStateStore _store;
     private readonly ILogger _logger;
     private readonly AccessRequestQueue _requests;
+    private readonly EnrollmentService _enroll;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
     // Keep this separate from the Control Plane (8765) and web block server (80/8766).
     private const int Port = 8771;
 
-    public ChildUxServer(ChildStateStore store, AccessRequestQueue requests, ILogger<ChildUxServer> logger)
+    public ChildUxServer(ChildStateStore store, AccessRequestQueue requests, EnrollmentService enroll, ILogger<ChildUxServer> logger)
     {
         _store = store;
         _requests = requests;
+        _enroll = enroll;
         _logger = logger;
     }
 
@@ -122,6 +125,8 @@ public sealed class ChildUxServer
                     "/" or "/today" => RenderToday(query),
                     "/request" => HandleRequest(query),
                     "/blocked" => RenderBlocked(query),
+                    "/pair" => RenderPair(query),
+                    "/pair/complete" => HandlePair(query),
                     _ => RenderNotFound()
                 };
 
@@ -198,7 +203,20 @@ public sealed class ChildUxServer
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Screen time</h2><div><b>Remaining:</b> {WebUtility.HtmlEncode(limitLabel)}</div><div class='muted'><b>Used:</b> {WebUtility.HtmlEncode(usedLabel)}</div>");
-        sb.Append("</div>");
+        
+        // Pairing helper: if not enrolled, offer link to pairing page.
+        var childId = AgentAuthStore.LoadCurrentChildId();
+        var hasAuth = childId is not null && AgentAuthStore.LoadAuth(childId) is not null;
+        if (!hasAuth)
+        {
+            sb.Append("<div class='muted' style='margin-top:10px'>This device is not paired yet.</div>");
+            sb.Append("<div style='margin-top:8px'><a href='/pair'>Enter pairing code</a></div>");
+        }
+        else
+        {
+            sb.Append("<div class='muted' style='margin-top:10px'>Device is paired.</div>");
+        }
+sb.Append("</div>");
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Status</h2><div><b>Mode:</b> {WebUtility.HtmlEncode(mode)}</div><div><b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}</div>");

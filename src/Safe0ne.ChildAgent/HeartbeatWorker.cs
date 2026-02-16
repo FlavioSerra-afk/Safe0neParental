@@ -71,13 +71,13 @@ public sealed class HeartbeatWorker : BackgroundService
 
         _logger.LogInformation("Safe0ne Child Agent started. ChildId={ChildId} Device={Device} Version={Version}", childId.Value, deviceName, agentVersion);
 
-        var auth = LoadAuth(childId);
+        var auth = AgentAuthStore.LoadAuth(childId);
         if (auth is null)
         {
             auth = await TryPairAsync(childId, deviceName, agentVersion, stoppingToken);
             if (auth is not null)
             {
-                SaveAuth(childId, auth);
+                AgentAuthStore.SaveAuth(childId, auth);
                 _logger.LogInformation("Paired successfully. DeviceId={DeviceId}", auth.DeviceId);
             }
             else
@@ -723,42 +723,13 @@ private static ChildId ResolveChildId()
         {
             return new ChildId(g);
         }
+        var persisted = AgentAuthStore.LoadCurrentChildId();
+        if (persisted is not null) return persisted;
         return new ChildId(DefaultChildGuid);
     }
 
-    private static string AuthPathFor(ChildId childId)
-    {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Safe0ne",
-            "ChildAgent");
-        Directory.CreateDirectory(dir);
-        return Path.Combine(dir, $"auth.{childId.Value}.v1.json");
-    }
-
-    private static AgentAuthState? LoadAuth(ChildId childId)
-    {
-        try
-        {
-            var path = AuthPathFor(childId);
-            if (!File.Exists(path)) return null;
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<AgentAuthState>(json, JsonDefaults.Options);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static void SaveAuth(ChildId childId, AgentAuthState state)
-    {
-        var path = AuthPathFor(childId);
-        var json = JsonSerializer.Serialize(state, JsonDefaults.Options);
-        File.WriteAllText(path, json);
-    }
-
-    private async Task<AgentAuthState?> TryPairAsync(ChildId childId, string deviceName, string agentVersion, CancellationToken ct)
+    
+    private async Task<AgentAuthStore.AgentAuthState?> TryPairAsync(ChildId childId, string deviceName, string agentVersion, CancellationToken ct)
     {
         var code = Environment.GetEnvironmentVariable("SAFEONE_PAIR_CODE");
         if (string.IsNullOrWhiteSpace(code)) return null;
@@ -781,7 +752,7 @@ private static ChildId ResolveChildId()
                 return null;
             }
 
-            return new AgentAuthState(parsed.Data.DeviceId, parsed.Data.DeviceToken, parsed.Data.IssuedAtUtc);
+            return new AgentAuthStore.AgentAuthState(parsed.Data.DeviceId, parsed.Data.DeviceToken, parsed.Data.IssuedAtUtc);
         }
         catch (Exception ex)
         {
@@ -790,13 +761,6 @@ private static ChildId ResolveChildId()
         }
     }
 
-    private sealed record AgentAuthState(
-        Guid DeviceId,
-        string DeviceToken,
-        DateTimeOffset IssuedAtUtc);
-
-
-    
     private static bool IsRunningElevatedWindows()
     {
         try

@@ -40,7 +40,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-LOCATION-GEOFENCE | Location | Geofence authoring + overlay + evaluation + alerts | ✅ | Parent: geofence overlay UX; Kid: eval; Alerts: activity | SSOT: geofence config + event stream | Implemented 16U13–16U15 |
 | EPIC-ALERTS-INBOX | Alerts | Alerts inbox: routing + grouping + ack | ✅ | Parent: Alerts inbox UI + ack | SSOT: alert routing/config + ack endpoints | Self-test PASS restored in 16W7a |
 | EPIC-REPORTS | Reports | Reports scheduling | 🟡 | Parent: reports scheduling surface | SSOT: report schedules (stub) | 16W7 = stub only |
-| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🔴 | Kid: pairing flow; Parent: add device | SSOT: device registry + enrollment | Planned in KFT-002+ |
+| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Kid: pairing flow; Parent: add device | SSOT: device registry + enrollment | Kid UX /pair; Local enroll endpoint; auth cache + current child binding |
 | EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🔴 | Kid agent | SSOT: policy versions + heartbeat | Planned in KFT-006+ |
 | EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
 | EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |

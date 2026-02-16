@@ -19,7 +19,8 @@ This is the **user-facing** manual for implemented Safe0ne functionality.
 9. `11_Audit_Log.md`
 10. `08_Reports.md`
 11. `09_DevTools_And_SelfTests.md`
-12. `10_Troubleshooting.md`
-13. `Appendix_Glossary.md`
+12. `12_Device_Pairing.md`
+13. `10_Troubleshooting.md`
+14. `Appendix_Glossary.md`
 
-> Note: Pairing/provisioning is documented as **planned** until the flow is implemented.
+> Note: Device pairing is now available in a minimal form; see `12_Device_Pairing.md`.
