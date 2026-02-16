@@ -1,0 +1,25 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test artifacts
+**/TestResults/
+
+# Logs
+*.log
+
+# Local runtime / data
+**/control-plane*.json
+**/enrollment*.json
+**/activity.outbox.*.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Safe0ne.ChildAgent": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "SAFEONE_PAIR_CODE": ""
+      }
+    }
+  }
+}

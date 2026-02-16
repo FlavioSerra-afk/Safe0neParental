@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Safe0ne Parental — Parent App</title>
+  <link rel="icon" href="/assets/FamilySafe.png" />
+  <link rel="stylesheet" href="/styles/tokens.css" />
+  <link rel="stylesheet" href="/styles/app.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="rail" aria-label="Main navigation">
+      <div class="rail__brand">
+        <img id="railLogo" class="rail__logo" src="/assets/FamilySafe.png" alt="Safe0ne" title="Tap 7x in 5s to unlock Dev Tools" style="cursor:pointer; user-select:none;" />
+        <div class="rail__name">Safe0ne</div>
+      </div>
+
+      <nav class="rail__nav">
+        <a class="rail__item" href="#/dashboard" data-route="dashboard">
+          <span class="rail__icon" aria-hidden="true">🏠</span>
+          <span class="rail__label">Dashboard</span>
+        </a>
+        <a class="rail__item" href="#/parent" data-route="parent">
+          <span class="rail__icon" aria-hidden="true">👤</span>
+          <span class="rail__label">Parent</span>
+        </a>
+        <a class="rail__item" href="#/children" data-route="children">
+          <span class="rail__icon" aria-hidden="true">🧒</span>
+          <span class="rail__label">Children</span>
+        </a>
+        <a class="rail__item" href="#/reports" data-route="reports">
+          <span class="rail__icon" aria-hidden="true">📈</span>
+          <span class="rail__label">Alerts & Reports</span>
+        </a>
+        <a class="rail__item" href="#/requests" data-route="requests">
+          <span class="rail__icon" aria-hidden="true">📬</span>
+          <span class="rail__label">Requests</span>
+        </a>
+        <a class="rail__item" href="#/support" data-route="support">
+          <span class="rail__icon" aria-hidden="true">🛟</span>
+          <span class="rail__label">Support</span>
+        </a>
+        <a class="rail__item" href="#/admin" data-route="admin">
+          <span class="rail__icon" aria-hidden="true">⚙️</span>
+          <span class="rail__label">Admin</span>
+        </a>
+        <a class="rail__item" href="#/devtools" data-route="devtools" id="nav-devtools" style="display:none;">
+          <span class="rail__icon" aria-hidden="true">🧰</span>
+          <span class="rail__label">Dev tools</span>
+        </a>
+      </nav>
+
+      <div class="rail__footer">
+        <div class="rail__small" id="appVersion" title="v0.0 (P0)" style="cursor:pointer; user-select:none;">v0.0 (P0)</div>
+      </div>
+    </aside>
+
+    <main class="content" role="main">
+      <header class="topbar" aria-label="Status header">
+        <div class="topbar__left">
+          <div class="chips" role="status" aria-live="polite">
+            <span class="chip chip--info" id="chip-protection">Protection: Unknown</span>
+            <span class="chip chip--info" id="chip-service">Local service: Checking…</span>
+          </div>
+        </div>
+        <div class="topbar__right">
+          <button class="icon-btn" id="theme-toggle" type="button" title="Toggle theme">🌓</button>
+          <button class="icon-btn" type="button" title="Notifications (stub)">🔔</button>
+          <button class="icon-btn" type="button" title="Profile (stub)">🙂</button>
+        </div>
+      </header>
+
+      <section class="page" id="page-root" tabindex="-1"></section>
+    </main>
+  </div>
+
+    <script>
+    // Hidden Dev Tools: tap the rail logo 7x within 5 seconds.
+    (function () {
+      const STORAGE_KEY = 'safe0ne_devtools_unlocked_v1';
+      const TAP_TARGET_ID = 'railLogo';
+      const MENU_ID = 'nav-devtools';
+      const REQUIRED_TAPS = 7;
+      const WINDOW_MS = 5000;
+
+      function showDevToolsNav() {
+        const el = document.getElementById(MENU_ID);
+        if (el) el.style.display = '';
+      }
+
+      function unlock() {
+        try { localStorage.setItem(STORAGE_KEY, '1'); } catch { }
+        showDevToolsNav();
+        // Optional: auto-navigate after unlock
+        if (location.hash !== '#/devtools') {
+          location.hash = '#/devtools';
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function () {
+        // Persist unlock across sessions
+        try {
+          if (localStorage.getItem(STORAGE_KEY) === '1') {
+            showDevToolsNav();
+          }
+        } catch { }
+
+        const target = document.getElementById(TAP_TARGET_ID);
+        if (!target) return;
+
+        let taps = 0;
+        let firstTapAt = 0;
+
+        function onTap() {
+          const now = Date.now();
+          if (now - firstTapAt > WINDOW_MS) {
+            taps = 0;
+            firstTapAt = now;
+          }
+          if (taps === 0) firstTapAt = now;
+          taps++;
+          if (taps >= REQUIRED_TAPS) {
+            taps = 0;
+            firstTapAt = 0;
+            unlock();
+          }
+        }
+
+        // Support both mouse and touch
+        target.addEventListener('click', onTap);
+        target.addEventListener('touchend', function (e) { e.preventDefault(); onTap(); }, { passive: false });
+      });
+    })();
+  </script>
+<script src="/app/api.js"></script>
+  <script src="/app/shared/ui.js"></script>
+  <script src="/app/modules.js"></script>
+  <script src="/app/features/alerts.js"></script>
+  <script src="/app/features/requests.js"></script>
+  <script src="/app/features/support.js"></script>
+  <script src="/app/features/reports.js"></script>
+  <script src="/app/features/parent.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app/features/children.js"></script>
+  <script src="/app/features/admin.js"></script>
+  <script src="/app/features/dashboard.js"></script>
+  <script src="/app/features/devtools.js"></script>
+  <script src="/app/status.js"></script>
+  <script src="/app/router.js?v=20260205"></script>
+</body>
+</html>
