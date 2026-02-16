@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
-using Safe0ne.DashboardServer.Reports;
 using Safe0ne.Shared.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,8 +18,6 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
-// 16W9: Reports scheduler (local-first).
-builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -483,15 +480,6 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
 // Backed by the same JsonFileControlPlane store to avoid duplicate registries.
 
 var local = app.MapGroup("/api/local");
-
-// 16W8: Audit log (append-only) viewer endpoint (local-first).
-local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var list = cp.GetLocalAuditEntries(id, take ?? 200).ToList();
-    return Results.Json(new ApiResponse<object>(new { childId, entries = list }, null), JsonDefaults.Options);
-});
-
 
 // Policy schema guardrail: provide a cheap, additive validation surface so we can harden the
 // Parent→SSOT→Kid loop without breaking marker tests or existing endpoints.
@@ -1280,14 +1268,6 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
     var profileJson = cp.GetOrCreateLocalSettingsProfileJson(id);
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
 
-    string? beforePolicyHash = null;
-    try
-    {
-        var existingPol = profileNode["policy"] as JsonObject;
-        if (existingPol is not null) beforePolicyHash = ComputeSha256Hex(existingPol.ToJsonString(JsonDefaults.Options));
-    }
-    catch { }
-
     profileNode["policy"] = incomingPolicy.DeepClone();
     var nextVersion = 1;
     if (profileNode.TryGetPropertyValue("policyVersion", out var pvNode) && pvNode is JsonValue)
@@ -1298,20 +1278,6 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
     profileNode["effectiveAtUtc"] = DateTime.UtcNow.ToString("O");
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
-
-    // 16W8: audit append
-    try
-    {
-        var afterValue = profileNode["policy"] is JsonObject po ? po.ToJsonString(JsonDefaults.Options) : "{}";
-        var afterPolicyHash = ComputeSha256Hex(afterValue);
-        var details = new JsonObject
-        {
-            ["route"] = "/api/local/children/{childId}/policy",
-            ["method"] = "PUT"
-        };
-        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
 
     // Return envelope
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
@@ -1354,9 +1320,6 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
     var storedPolicy = profileNode["policy"] as JsonObject ?? new JsonObject();
 
-    string? beforePolicyHash = null;
-    try { beforePolicyHash = ComputeSha256Hex(storedPolicy.ToJsonString(JsonDefaults.Options)); } catch { }
-
     static JsonNode DeepMerge(JsonNode dst, JsonNode src)
     {
         if (dst is JsonObject dobj && src is JsonObject sobj)
@@ -1386,64 +1349,8 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
 
-    // 16W8: audit append
-    try
-    {
-        var afterValue = (profileNode["policy"] as JsonObject ?? new JsonObject()).ToJsonString(JsonDefaults.Options);
-        var afterPolicyHash = ComputeSha256Hex(afterValue);
-        var details = new JsonObject
-        {
-            ["route"] = "/api/local/children/{childId}/policy",
-            ["method"] = "PATCH"
-        };
-        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
-
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
-});
-
-
-
-// --- Reports scheduling (16W9: real) ---
-// Schedules are stored under SSOT Local Settings Profile (policy.reports). Execution state is root.reportsState.
-local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-// PUT schedule: { enabled: bool, digest: { frequency: off|daily|weekly, timeLocal: HH:mm, weekday: mon..sun } }
-local.MapPut("/children/{childId:guid}/reports/schedule", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-
-    string raw;
-    using (var reader = new StreamReader(req.Body))
-        raw = await reader.ReadToEndAsync();
-
-    JsonNode? node;
-    try { node = JsonNode.Parse(raw); } catch { node = null; }
-    if (node is not JsonObject obj)
-    {
-        return Results.Json(new ApiResponse<object>(null, new ApiError("bad_request", "Missing or invalid JSON body")), JsonDefaults.Options,
-            statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    ReportsDigest.UpsertSchedule(cp, id, obj);
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-// Manual trigger: runs digest now and appends a report_digest activity event.
-local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var ran = ReportsDigest.TryRunDigestIfDue(cp, id, DateTimeOffset.UtcNow, force: true);
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(new { ok = true, ran, envelope = env }, null), JsonDefaults.Options);
 });
 
 // v1 aliases (additive): keep Kid/diagnostics flexible without breaking the existing /api/v1/.../policy contract.
@@ -1969,3 +1876,14 @@ app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:8765");
 
 app.Run();
+
+
+// === Helper: SHA-256 hex (used by local audit/device token hashing) ===
+// In top-level statement projects, declaring a local static function here makes it available
+// throughout Program.cs (the compiler emits it on the generated Program class).
+static string ComputeSha256Hex(string input)
+{
+    var bytes = System.Text.Encoding.UTF8.GetBytes(input ?? string.Empty);
+    var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+    return System.Convert.ToHexString(hash);
+}
