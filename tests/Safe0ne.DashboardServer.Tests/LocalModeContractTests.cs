@@ -28,4 +28,16 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         var res = await client.GetAsync("/api/local/children");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
+
+
+    [Fact]
+    public async Task LocalAudit_Endpoint_Exists()
+    {
+        using var client = _factory.CreateClient();
+        // Seed childId (deterministic)
+        var childId = "11111111-1111-1111-1111-111111111111";
+        var res = await client.GetAsync($"/api/local/children/{childId}/audit");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+    }
+
 }

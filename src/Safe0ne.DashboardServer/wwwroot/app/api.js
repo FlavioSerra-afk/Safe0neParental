@@ -58,6 +58,14 @@ const Safe0neApi = {
     return await _get(`/api/local/children/${encodeURIComponent(childId)}/activity${qs}`);
   },
 
+  // 16W8: Local Mode Audit Log (policy/settings changes)
+  async getChildAuditLocal(childId, opts){
+    const params = [];
+    if (opts && opts.take) params.push(`take=${encodeURIComponent(opts.take)}`);
+    const qs = params.length ? `?${params.join("&")}` : "";
+    return await _get(`/api/local/children/${encodeURIComponent(childId)}/audit${qs}`);
+  },
+
   // Local Mode: Location (last known)
   async getChildLocationLocal(childId){
     return await _get(`/api/local/children/${encodeURIComponent(childId)}/location`);

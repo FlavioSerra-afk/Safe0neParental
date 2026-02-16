@@ -28,7 +28,7 @@ public sealed class JsonFileControlPlane
         public DateTimeOffset? ArchivedAt => ArchivedAtUtc;
     }
 
-private const int CurrentSchemaVersion = 2;
+private const int CurrentSchemaVersion = 3;
     private const int MinSupportedSchemaVersion = 1;
 
 
@@ -47,6 +47,9 @@ private readonly object _gate = new();
 
     // Local mode: activity events (stored as JSON arrays per child).
     private Dictionary<string, string> _localActivityEventsJsonByChildGuid = new(StringComparer.OrdinalIgnoreCase);
+
+    // 16W8: local audit log events (append-only JSON arrays per child).
+    private Dictionary<string, string> _localAuditEventsJsonByChildGuid = new(StringComparer.OrdinalIgnoreCase);
 
     // Local mode: last known location (stored as JSON object per child).
     private Dictionary<string, string> _localLastLocationJsonByChildGuid = new(StringComparer.OrdinalIgnoreCase);
@@ -670,6 +673,135 @@ public IReadOnlyList<LocalChildSnapshot> GetChildrenWithArchiveState(bool includ
         }
     }
 
+
+
+
+    // 16W8: Local Mode Audit Log (append-only)
+    // Stores audit entries as JSON arrays per child for forward-compat.
+    public void AppendLocalAuditEntry(ChildId childId, string action, string scope, string actor, string? beforeHashSha256, string? afterHashSha256, JsonObject? details)
+    {
+        var key = childId.Value.ToString();
+        lock (_gate)
+        {
+            AppendLocalAuditEntryUnsafe_NoLock(key, action, scope, actor, beforeHashSha256, afterHashSha256, details);
+        }
+    }
+
+    public IReadOnlyList<JsonElement> GetLocalAuditEntries(ChildId childId, int take)
+    {
+        var key = childId.Value.ToString();
+        lock (_gate)
+        {
+            take = take <= 0 ? 200 : Math.Min(take, 1000);
+            var existing = _localAuditEventsJsonByChildGuid.TryGetValue(key, out var current) && !string.IsNullOrWhiteSpace(current)
+                ? current
+                : "[]";
+
+            try
+            {
+                using var doc = JsonDocument.Parse(existing);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                    return Array.Empty<JsonElement>();
+
+                var list = new List<JsonElement>();
+                foreach (var e in doc.RootElement.EnumerateArray())
+                    list.Add(e.Clone());
+
+                if (list.Count > take)
+                    list = list.Skip(list.Count - take).ToList();
+
+                // Newest-first for UI convenience.
+                list.Reverse();
+                return list;
+            }
+            catch
+            {
+                return Array.Empty<JsonElement>();
+            }
+        }
+    }
+
+    private void AppendLocalAuditEntryUnsafe_NoLock(string key, string action, string scope, string actor, string? beforeHashSha256, string? afterHashSha256, JsonObject? details)
+    {
+        if (string.IsNullOrWhiteSpace(action)) return;
+        if (string.IsNullOrWhiteSpace(scope)) scope = "policy";
+        if (string.IsNullOrWhiteSpace(actor)) actor = "unknown";
+
+        var existing = _localAuditEventsJsonByChildGuid.TryGetValue(key, out var current) && !string.IsNullOrWhiteSpace(current)
+            ? current
+            : "[]";
+
+        try
+        {
+            using var existingDoc = JsonDocument.Parse(existing);
+            if (existingDoc.RootElement.ValueKind != JsonValueKind.Array)
+                return;
+
+            var items = new List<JsonElement>();
+            foreach (var e in existingDoc.RootElement.EnumerateArray()) items.Add(e.Clone());
+
+            // Get previous hash for a lightweight hash-chain (tamper-evident ordering).
+            var prevHash = "";
+            if (items.Count > 0)
+            {
+                var last = items[^1];
+                if (last.ValueKind == JsonValueKind.Object && last.TryGetProperty("hash", out var h) && h.ValueKind == JsonValueKind.String)
+                    prevHash = h.GetString() ?? "";
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var entryId = Guid.NewGuid().ToString();
+            var detailsObj = details ?? new JsonObject();
+            var detailsJson = detailsObj.ToJsonString(JsonDefaults.Options);
+            var detailsHash = ComputeSha256Hex(detailsJson);
+
+            // Hash chain: hash(prevHash | occurredAt | child | actor | action | scope | before | after | detailsHash)
+            var payload = $"{prevHash}|{now:O}|{key}|{actor}|{action}|{scope}|{beforeHashSha256 ?? ""}|{afterHashSha256 ?? ""}|{detailsHash}";
+            var hash = ComputeSha256Hex(payload);
+
+            var obj = new JsonObject
+            {
+                ["id"] = entryId,
+                ["occurredAtUtc"] = now.ToString("O"),
+                ["childId"] = key,
+                ["actor"] = actor,
+                ["action"] = action,
+                ["scope"] = scope,
+                ["beforeHashSha256"] = beforeHashSha256,
+                ["afterHashSha256"] = afterHashSha256,
+                ["prevHash"] = prevHash,
+                ["hash"] = hash,
+                ["details"] = detailsObj
+            };
+
+            using var entryDoc = JsonDocument.Parse(obj.ToJsonString(JsonDefaults.Options));
+            items.Add(entryDoc.RootElement.Clone());
+
+            // Retention: prune entries older than 180 days by occurredAtUtc, keep last 2000 max.
+            var cutoff = DateTimeOffset.UtcNow.AddDays(-180);
+            var filtered = new List<JsonElement>(items.Count);
+            foreach (var e in items)
+            {
+                if (e.ValueKind != JsonValueKind.Object) continue;
+                if (e.TryGetProperty("occurredAtUtc", out var t) && t.ValueKind == JsonValueKind.String)
+                {
+                    if (DateTimeOffset.TryParse(t.GetString(), out var dto) && dto < cutoff)
+                        continue;
+                }
+                filtered.Add(e);
+            }
+
+            if (filtered.Count > 2000)
+                filtered = filtered.Skip(filtered.Count - 2000).ToList();
+
+            _localAuditEventsJsonByChildGuid[key] = JsonSerializer.Serialize(filtered, JsonDefaults.Options);
+            PersistUnsafe_NoLock();
+        }
+        catch
+        {
+            // best-effort; never break policy saves
+        }
+    }
 
 /// <summary>
 /// Get the last known location JSON for a child. Returns a stable JSON object even when no location is known.
@@ -1710,6 +1842,9 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
                 _localActivityEventsJsonByChildGuid = (state.LocalActivityEvents ?? new List<LocalActivityEventsState>())
                     .ToDictionary(a => a.ChildId.Value.ToString(), a => a.EventsJson, StringComparer.OrdinalIgnoreCase);
 
+                _localAuditEventsJsonByChildGuid = (state.LocalAuditEvents ?? new List<LocalAuditEventsState>())
+                    .ToDictionary(a => a.ChildId.Value.ToString(), a => a.EventsJson, StringComparer.OrdinalIgnoreCase);
+
                 _localLastLocationJsonByChildGuid = (state.LocalLocations ?? new List<LocalLocationState>())
                     .ToDictionary(a => a.ChildId.Value.ToString(), a => a.LocationJson, StringComparer.OrdinalIgnoreCase);
 
@@ -1795,6 +1930,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         _diagnosticsByChildGuid = new Dictionary<string, DiagnosticsBundleInfo>(StringComparer.OrdinalIgnoreCase);
 
         _localLastLocationJsonByChildGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _localAuditEventsJsonByChildGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         _requests = new List<AccessRequest>();
         _grants = new List<Grant>();
@@ -1824,6 +1960,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
             LocalChildMeta: _localChildMetaJsonByChildGuid.Select(kvp => new LocalChildMetaState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalSettingsProfiles: _localSettingsProfileJsonByChildGuid.Select(kvp => new LocalSettingsProfileState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalActivityEvents: _localActivityEventsJsonByChildGuid.Select(kvp => new LocalActivityEventsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
+            LocalAuditEvents: _localAuditEventsJsonByChildGuid.Select(kvp => new LocalAuditEventsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalLocations: _localLastLocationJsonByChildGuid.Select(kvp => new LocalLocationState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             SchemaVersion: CurrentSchemaVersion
         );
@@ -1917,6 +2054,10 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         ChildId ChildId,
         string EventsJson);
 
+    private sealed record LocalAuditEventsState(
+        ChildId ChildId,
+        string EventsJson);
+
     private sealed record ChildCommandsState(
         ChildId ChildId,
         List<ChildCommand> Commands);
@@ -1938,6 +2079,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         List<LocalChildMetaState>? LocalChildMeta = null,
         List<LocalSettingsProfileState>? LocalSettingsProfiles = null,
         List<LocalActivityEventsState>? LocalActivityEvents = null,
+        List<LocalAuditEventsState>? LocalAuditEvents = null,
         List<LocalLocationState>? LocalLocations = null,
         int SchemaVersion = CurrentSchemaVersion);
 
