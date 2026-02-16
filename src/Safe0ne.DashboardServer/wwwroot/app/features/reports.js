@@ -201,7 +201,7 @@
       <div class="grid" style="margin-top:12px">
         <div class="card">
           <h2>Reports</h2>
-          <p class="muted">Scheduling is a stub (stored in SSOT policy). Delivery/automation comes later.</p>
+          <p class="muted">Scheduling runs locally and writes digests into the SSOT activity stream.</p>
           <div id="${scheduleId}">${escapeHtml("Loading…")}</div>
         </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
@@ -292,17 +292,18 @@
     const timeId = "rep-time";
     const dayId = "rep-day";
     const saveId = "rep-save";
+    const runId = "rep-run";
     const statusId = "rep-status";
+    const recentId = "rep-recent";
 
     // Load current settings from first child (best-effort); apply-to-all on save.
     let current = { frequency: "off", timeLocal: "18:00", weekday: "sun" };
     try{
       const first = children && children[0] ? children[0] : null;
-      if (first && first.id && Safe0neApi && typeof Safe0neApi.getChildPolicyLocal === "function"){
-        const res = await Safe0neApi.getChildPolicyLocal(first.id);
-        const pol = (res && res.ok && res.data && res.data.policy) ? res.data.policy : (res && res.ok ? res.data : null);
-        const rep = pol && pol.reports ? pol.reports : null;
-        const dig = rep && rep.digest ? rep.digest : null;
+      if (first && first.id && Safe0neApi && typeof Safe0neApi.getChildReportsScheduleLocal === "function"){
+        const res = await Safe0neApi.getChildReportsScheduleLocal(first.id);
+        const sch = (res && res.ok && res.data && res.data.schedule) ? res.data.schedule : null;
+        const dig = sch && sch.digest ? sch.digest : null;
         if (dig){
           current.frequency = String(dig.frequency || current.frequency);
           current.timeLocal = String(dig.timeLocal || current.timeLocal);
@@ -338,8 +339,13 @@
           </select>
         </label>
         <button id="${saveId}" class="btn btn--primary" title="Save schedule to all children (SSOT)">💾 Save</button>
+        <button id="${runId}" class="btn" title="Run the report digest now (creates an SSOT activity item)">▶ Run now</button>
       </div>
       <div id="${statusId}" class="muted" style="margin-top:8px"></div>
+      <div style="margin-top:10px">
+        <div style="font-weight:700;margin-bottom:6px">Recent reports</div>
+        <div id="${recentId}" class="muted">Loading…</div>
+      </div>
     `;
 
     // Init current values
@@ -364,7 +370,7 @@
     root.addEventListener('click', async (ev) => {
       const t = ev && ev.target ? ev.target : null;
       if (!t || !t.id) return;
-      if (t.id !== saveId) return;
+      if (t.id !== saveId && t.id !== runId) return;
 
       const status = document.getElementById(statusId);
       if (status) status.textContent = "Saving…";
@@ -373,26 +379,77 @@
       const timeLocal = String(document.getElementById(timeId)?.value || '18:00');
       const weekday = String(document.getElementById(dayId)?.value || 'sun');
 
-      const payload = {
-        reports: {
-          enabled: (freq !== 'off'),
-          digest: { frequency: freq, timeLocal, weekday }
+      const schedulePatch = { enabled: (freq !== 'off'), digest: { frequency: freq, timeLocal, weekday } };
+
+      if (t.id === runId){
+        let ran = 0, rfail = 0;
+        for (const c of (children || [])){
+          const cid = c && c.id ? String(c.id) : '';
+          if (!cid) continue;
+          try{
+            if (!Safe0neApi || typeof Safe0neApi.runChildReportsNowLocal !== 'function') throw new Error('Local reports run-now API not available');
+            const r = await Safe0neApi.runChildReportsNowLocal(cid);
+            if (r && r.ok) ran++; else rfail++;
+          }catch{ rfail++; }
         }
-      };
+        if (status) status.textContent = (rfail === 0)
+          ? `Triggered report digest for ${ran} child(ren).`
+          : `Triggered for ${ran}, failed for ${rfail}.`;
+
+        // Refresh recent list.
+        try{ await renderRecentReportsList(document.getElementById(recentId), children); }catch{}
+        return;
+      }
 
       let ok = 0, fail = 0;
       for (const c of (children || [])){
         const cid = c && c.id ? String(c.id) : '';
         if (!cid) continue;
         try{
-          if (!Safe0neApi || typeof Safe0neApi.patchChildPolicyLocal !== 'function') throw new Error('Local policy PATCH not available');
-          const r = await Safe0neApi.patchChildPolicyLocal(cid, payload);
+          if (!Safe0neApi || typeof Safe0neApi.putChildReportsScheduleLocal !== 'function') throw new Error('Local reports schedule API not available');
+          const r = await Safe0neApi.putChildReportsScheduleLocal(cid, schedulePatch);
           if (r && r.ok) ok++; else fail++;
         }catch{ fail++; }
       }
       if (status) status.textContent = (fail === 0)
-        ? `Saved to SSOT for ${ok} child(ren).`
+        ? `Saved schedule to SSOT for ${ok} child(ren).`
         : `Saved for ${ok}, failed for ${fail}. (If server was down, this was not persisted.)`;
     });
+  }
+
+
+  async function renderRecentReportsList(root, children){
+    if (!root) return;
+    if (!Safe0neApi || typeof Safe0neApi.getChildActivityLocal !== 'function'){
+      root.textContent = 'Activity API unavailable.';
+      return;
+    }
+    const from = new Date(Date.now() - 7*24*60*60*1000).toISOString();
+    const items = [];
+    for (const c of (children || [])){
+      const cid = c && c.id ? String(c.id) : '';
+      if (!cid) continue;
+      try{
+        const res = await Safe0neApi.getChildActivityLocal(cid, { from, take: 200 });
+        const arr = (res && res.ok && Array.isArray(res.data)) ? res.data : [];
+        for (const ev of arr){
+          if (!ev || String(ev.kind || '') !== 'report_digest') continue;
+          const when = String(ev.occurredAtUtc || '');
+          let details = null;
+          try{ details = ev.details ? JSON.parse(String(ev.details)) : null; }catch{}
+          const summary = details && details.summary ? String(details.summary) : 'Digest generated.';
+          items.push({ childName: c.displayName || 'Child', when, summary });
+        }
+      }catch{}
+    }
+    items.sort((a,b) => Date.parse(String(b.when||'')) - Date.parse(String(a.when||'')));
+    if (items.length === 0){
+      root.textContent = 'No reports generated yet.';
+      return;
+    }
+    root.innerHTML = items.slice(0, 12).map(it => {
+      const w = it.when ? fmtWhen(it.when) : '';
+      return `<div style="margin-bottom:6px"><div style="font-weight:600">${escapeHtml(it.childName)} — ${escapeHtml(w)}</div><div class="muted">${escapeHtml(it.summary)}</div></div>`;
+    }).join('');
   }
 })();

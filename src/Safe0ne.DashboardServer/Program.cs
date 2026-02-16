@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
+using Safe0ne.DashboardServer.Reports;
 using Safe0ne.Shared.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +19,8 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
+// 16W9: Reports scheduler (local-first).
+builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -42,13 +45,6 @@ static bool TryGetDeviceToken(HttpRequest req, out string token)
     if (string.IsNullOrWhiteSpace(raw)) return false;
     token = raw.Trim();
     return true;
-}
-
-static string ComputeSha256Hex(string input)
-{
-    var bytes = System.Text.Encoding.UTF8.GetBytes(input ?? "");
-    var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-    return Convert.ToHexString(hash);
 }
 
 // --- Control Plane v1 ---
@@ -400,15 +396,6 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
 {
     var id = new ChildId(childId);
 
-    // 16W8: audit baseline (best-effort)
-    string? beforePolicyHash = null;
-    try
-    {
-        if (cp.TryGetPolicy(id, out var existingPolicy))
-            beforePolicyHash = ComputeSha256Hex(JsonSerializer.Serialize(existingPolicy, JsonDefaults.Options));
-    }
-    catch { }
-
     // Read raw JSON once so we can both:
     // 1) deserialize into the stable v1 request contract (unknown fields are ignored)
     // 2) extract additive "stub" fields that may not yet exist in the v1 contract
@@ -454,23 +441,6 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
     }
 
     var updated = cp.UpsertPolicy(id, body);
-
-    // 16W8: audit append (v1 policy update)
-    try
-    {
-        var afterPolicyHash = ComputeSha256Hex(JsonSerializer.Serialize(updated, JsonDefaults.Options));
-        var details = new JsonObject
-        {
-            ["route"] = "/api/v1/children/{childId}/policy",
-            ["mode"] = body.Mode.ToString(),
-            ["alwaysAllowed"] = body.AlwaysAllowed,
-            ["grantMinutes"] = body.GrantMinutes
-        };
-        var actor = string.IsNullOrWhiteSpace(body.UpdatedBy) ? "parent-ui" : body.UpdatedBy;
-        cp.AppendLocalAuditEntry(id, "policy.update", "policy", actor, beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
-
 
     // PATCH 16T bridge: persist SafeSearch / YouTube Restricted Mode into the SSOT policy surface
     // under the Local Settings Profile (used by /api/local/children/{id}/policy and the Kid agent).
@@ -1301,14 +1271,6 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
     var profileJson = cp.GetOrCreateLocalSettingsProfileJson(id);
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
 
-    string? beforePolicyHash = null;
-    try
-    {
-        var existingPol = profileNode["policy"] as JsonObject;
-        if (existingPol is not null) beforePolicyHash = ComputeSha256Hex(existingPol.ToJsonString(JsonDefaults.Options));
-    }
-    catch { }
-
     profileNode["policy"] = incomingPolicy.DeepClone();
     var nextVersion = 1;
     if (profileNode.TryGetPropertyValue("policyVersion", out var pvNode) && pvNode is JsonValue)
@@ -1320,21 +1282,6 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
 
-    // 16W8: audit append
-    try
-    {
-        var afterValue = profileNode["policy"] is JsonObject po ? po.ToJsonString(JsonDefaults.Options) : "{}";
-        var afterPolicyHash = ComputeSha256Hex(afterValue);
-        var details = new JsonObject
-        {
-            ["route"] = "/api/local/children/{childId}/policy",
-            ["method"] = "PUT"
-        };
-        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
-
-
     // Return envelope
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
@@ -1345,14 +1292,6 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
 local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
-
-// 16W8: Local audit log (append-only, SSOT-backed)
-local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var list = cp.GetLocalAuditEntries(id, take ?? 200).ToList();
-    return Results.Json(new ApiResponse<object>(new { childId, entries = list }, null), JsonDefaults.Options);
-});
 
     string raw;
     using (var reader = new StreamReader(req.Body))
@@ -1384,9 +1323,6 @@ local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFil
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
     var storedPolicy = profileNode["policy"] as JsonObject ?? new JsonObject();
 
-    string? beforePolicyHash = null;
-    try { beforePolicyHash = ComputeSha256Hex(storedPolicy.ToJsonString(JsonDefaults.Options)); } catch { }
-
     static JsonNode DeepMerge(JsonNode dst, JsonNode src)
     {
         if (dst is JsonObject dobj && src is JsonObject sobj)
@@ -1416,37 +1352,50 @@ local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFil
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
 
-    // 16W8: audit append
-    try
-    {
-        var afterValue = (profileNode["policy"] is JsonObject po ? po.ToJsonString(JsonDefaults.Options) : "{}");
-        var afterPolicyHash = ComputeSha256Hex(afterValue);
-        var details = new JsonObject
-        {
-            ["route"] = "/api/local/children/{childId}/policy",
-            ["method"] = "PATCH"
-        };
-        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
-
-    // 16W8: audit append
-    try
-    {
-        var afterValue = profileNode["policy"] is JsonObject po ? po.ToJsonString(JsonDefaults.Options) : "{}";
-        var afterPolicyHash = ComputeSha256Hex(afterValue);
-        var details = new JsonObject
-        {
-            ["route"] = "/api/local/children/{childId}/policy",
-            ["method"] = "PUT"
-        };
-        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
-    }
-    catch { }
-
-
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
+});
+
+
+
+// --- Reports scheduling (16W9: real) ---
+// Schedules are stored under SSOT Local Settings Profile (policy.reports). Execution state is root.reportsState.
+local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+// PUT schedule: { enabled: bool, digest: { frequency: off|daily|weekly, timeLocal: HH:mm, weekday: mon..sun } }
+local.MapPut("/children/{childId:guid}/reports/schedule", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+
+    string raw;
+    using (var reader = new StreamReader(req.Body))
+        raw = await reader.ReadToEndAsync();
+
+    JsonNode? node;
+    try { node = JsonNode.Parse(raw); } catch { node = null; }
+    if (node is not JsonObject obj)
+    {
+        return Results.Json(new ApiResponse<object>(null, new ApiError("bad_request", "Missing or invalid JSON body")), JsonDefaults.Options,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    ReportsDigest.UpsertSchedule(cp, id, obj);
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+// Manual trigger: runs digest now and appends a report_digest activity event.
+local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var ran = ReportsDigest.TryRunDigestIfDue(cp, id, DateTimeOffset.UtcNow, force: true);
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, id, DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(new { ok = true, ran, envelope = env }, null), JsonDefaults.Options);
 });
 
 // v1 aliases (additive): keep Kid/diagnostics flexible without breaking the existing /api/v1/.../policy contract.
