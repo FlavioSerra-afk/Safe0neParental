@@ -33,6 +33,15 @@ const Safe0neApi = {
     return await _patch(`/api/local/children/${encodeURIComponent(childId)}/policy`, payload);
   },
 
+  // 16W8: Local Mode Audit Log (policy/settings changes)
+  async getChildAuditLocal(childId, opts){
+    const params = [];
+    if (opts && opts.take) params.push(`take=${encodeURIComponent(opts.take)}`);
+    const qs = params.length ? `?${params.join("&")}` : "";
+    return await _get(`/api/local/children/${encodeURIComponent(childId)}/audit${qs}`);
+  },
+
+  
 
   // Local Mode: Devices + pairing
   async getChildDevicesLocal(childId){

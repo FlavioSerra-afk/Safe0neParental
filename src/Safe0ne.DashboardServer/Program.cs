@@ -1271,6 +1271,14 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
     var profileJson = cp.GetOrCreateLocalSettingsProfileJson(id);
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
 
+    string? beforePolicyHash = null;
+    try
+    {
+        var existingPol = profileNode["policy"] as JsonObject;
+        if (existingPol is not null) beforePolicyHash = ComputeSha256Hex(existingPol.ToJsonString(JsonDefaults.Options));
+    }
+    catch { }
+
     profileNode["policy"] = incomingPolicy.DeepClone();
     var nextVersion = 1;
     if (profileNode.TryGetPropertyValue("policyVersion", out var pvNode) && pvNode is JsonValue)
@@ -1281,6 +1289,20 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
     profileNode["effectiveAtUtc"] = DateTime.UtcNow.ToString("O");
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
+
+    // 16W8: audit append
+    try
+    {
+        var afterValue = profileNode["policy"] is JsonObject po ? po.ToJsonString(JsonDefaults.Options) : "{}";
+        var afterPolicyHash = ComputeSha256Hex(afterValue);
+        var details = new JsonObject
+        {
+            ["route"] = "/api/local/children/{childId}/policy",
+            ["method"] = "PUT"
+        };
+        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
+    }
+    catch { }
 
     // Return envelope
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
@@ -1323,6 +1345,9 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
     var profileNode = JsonNode.Parse(profileJson) as JsonObject ?? new JsonObject();
     var storedPolicy = profileNode["policy"] as JsonObject ?? new JsonObject();
 
+    string? beforePolicyHash = null;
+    try { beforePolicyHash = ComputeSha256Hex(storedPolicy.ToJsonString(JsonDefaults.Options)); } catch { }
+
     static JsonNode DeepMerge(JsonNode dst, JsonNode src)
     {
         if (dst is JsonObject dobj && src is JsonObject sobj)
@@ -1351,6 +1376,20 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
     profileNode["effectiveAtUtc"] = DateTime.UtcNow.ToString("O");
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
+
+    // 16W8: audit append
+    try
+    {
+        var afterValue = (profileNode["policy"] as JsonObject ?? new JsonObject()).ToJsonString(JsonDefaults.Options);
+        var afterPolicyHash = ComputeSha256Hex(afterValue);
+        var details = new JsonObject
+        {
+            ["route"] = "/api/local/children/{childId}/policy",
+            ["method"] = "PATCH"
+        };
+        cp.AppendLocalAuditEntry(id, "policy.save", "policy", "parent-ui", beforePolicyHash, afterPolicyHash, details);
+    }
+    catch { }
 
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
@@ -1920,4 +1959,12 @@ app.MapFallbackToFile("index.html");
 app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:8765");
 
-app.Run();
+app.Run();local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var list = cp.GetLocalAuditEntries(id, take ?? 200).ToList();
+    return Results.Json(new ApiResponse<object>(new { childId, entries = list }, null), JsonDefaults.Options);
+});
+
+
+

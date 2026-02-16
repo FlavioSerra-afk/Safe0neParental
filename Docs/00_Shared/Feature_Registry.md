@@ -48,7 +48,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🔴 | Kid UX | SSOT: policy + runtime state | Planned in KFT-029+ |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🔴 | Kid agent + alerts | SSOT: health + tamper signals | Planned in KFT-038+ |
-EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Parent: Admin → Advanced → Audit Log | SSOT: Local Control Plane (append-only per-child audit chain) | Implemented (16W8): logs policy saves; endpoint GET /api/local/children/{id}/audit |
+EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Parent: Admin → Advanced → Audit Log | SSOT: Local Control Plane (append-only per-child audit chain) | Implemented (16W8, restored in 16W9b hotfix): logs policy saves; endpoint GET /api/local/children/{id}/audit |
 
 ## How to update this registry (every patch)
 1. Identify affected epic(s) and specific features.

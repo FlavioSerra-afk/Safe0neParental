@@ -32,5 +32,10 @@ Each audit entry is a JSON object with the following common fields:
 - Entries are pruned by retention policy (time-based) and capped by a max item count to avoid unbounded growth.
 
 ## Troubleshooting
+- If the Audit Log UI shows an error, confirm the DashboardServer local API is running and reachable, and that the endpoint `GET /api/local/children/{id}/audit` returns data.
 - If the Audit Log is empty, confirm you have saved a policy change for that child.
 - If you see WebView2 storage warnings, this does **not** affect the audit log (audit is persisted in the Local Control Plane, not browser storage).
+
+
+## API surface (for debugging)
+- `GET /api/local/children/{id}/audit?take=200` — returns the most recent entries.
