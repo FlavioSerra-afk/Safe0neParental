@@ -484,6 +484,15 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
 
 var local = app.MapGroup("/api/local");
 
+// 16W8: Audit log (append-only) viewer endpoint (local-first).
+local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var list = cp.GetLocalAuditEntries(id, take ?? 200).ToList();
+    return Results.Json(new ApiResponse<object>(new { childId, entries = list }, null), JsonDefaults.Options);
+});
+
+
 // Policy schema guardrail: provide a cheap, additive validation surface so we can harden the
 // Parent→SSOT→Kid loop without breaking marker tests or existing endpoints.
 // This does NOT mutate SSOT; it validates the *effective merged* policy surface (defaults + stored).
@@ -1959,12 +1968,4 @@ app.MapFallbackToFile("index.html");
 app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:8765");
 
-app.Run();local.MapGet("/children/{childId:guid}/audit", (Guid childId, int? take, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var list = cp.GetLocalAuditEntries(id, take ?? 200).ToList();
-    return Results.Json(new ApiResponse<object>(new { childId, entries = list }, null), JsonDefaults.Options);
-});
-
-
-
+app.Run();

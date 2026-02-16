@@ -724,7 +724,7 @@ private static ChildId ResolveChildId()
             return new ChildId(g);
         }
         var persisted = AgentAuthStore.LoadCurrentChildId();
-        if (persisted is not null) return persisted;
+        if (persisted.HasValue) return persisted.Value;
         return new ChildId(DefaultChildGuid);
     }
 

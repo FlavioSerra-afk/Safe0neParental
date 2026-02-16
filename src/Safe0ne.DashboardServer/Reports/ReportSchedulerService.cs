@@ -58,7 +58,7 @@ public sealed class ReportSchedulerService : BackgroundService
             try
             {
                 var childId = c.Id;
-                if (childId is null) continue;
+                if (childId == default) continue;
                 ReportsDigest.TryRunDigestIfDue(_cp, childId, nowUtc, force: false);
             }
             catch
