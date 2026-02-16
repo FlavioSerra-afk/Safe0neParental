@@ -1,51 +1,45 @@
-# Safe0ne Parental — Child App — Implementation Matrix
+# Safe0ne Parental — Child App (Agent + Kid UX) — Implementation Matrix
 
-Updated: 2026-02-02
+Updated: 2026-02-16
 
-Legend: ✅ supported, ⚠️ partial/depends, — not applicable
+Legend:
+- ✅ Implemented (wired to SSOT / Local Control Plane, observable behavior, basic markers/tests where applicable)
+- 🟡 Partial (stubs/UI exist; incomplete wiring or enforcement)
+- 🔴 Not implemented
+- — Not applicable
 
-| Feature ID | Section | Feature | Compatible | Implemented |
-|---|---|---|---|---|
-| KFT-001 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) | **iOS** = iPhone/iPad Kids app | note: platform constraints | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-002 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 1) Pairing & Provisioning | Pair device to **family** + **child profile** (QR / pairing code / deep link) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-003 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 1) Pairing & Provisioning | Permissions wizard (plain language; explains “why”) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-004 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 1) Pairing & Provisioning | Offline-first provisioning (cache last policy; enforce even offline) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-005 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 1) Pairing & Provisioning | Device identity (name, type, OS version) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-006 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 2) Policy Sync & Runtime | Background agent (service/daemon) with watchdog | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-007 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 2) Policy Sync & Runtime | Policy sync (versioned), safe rollback, integrity checks | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-008 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 2) Policy Sync & Runtime | Time-boxed grants override blocks temporarily | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-009 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 2) Policy Sync & Runtime | Telemetry heartbeat (last seen, policy applied) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-010 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.1 Screen time & routines | Daily screen-time budgets | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-011 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.1 Screen time & routines | Schedules: Bedtime / School / Homework | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-012 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.1 Screen time & routines | Modes: Lockdown / Open / Homework / Bedtime | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-013 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.1 Screen time & routines | Grace periods + warnings (5 min / 1 min) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-014 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.2 Apps & games controls | App allow/deny list | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-015 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.2 Apps & games controls | Per-app time limits | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-016 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.2 Apps & games controls | Install controls / require approval (where supported) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-017 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.2 Apps & games controls | Block “newly installed apps until approved” | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-018 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.3 Web & content filtering | Category-based filtering (allow/alert/block) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-019 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.3 Web & content filtering | Explicit “Adult/Porn blocking” toggle | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-020 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.3 Web & content filtering | SafeSearch / Restricted Mode enforcement (best effort) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-021 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.3 Web & content filtering | Circumvention detection (VPN/proxy/private DNS) + alerts (best effort) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-022 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.4 Social & communication safety | Social app time limits (supported apps) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-023 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.4 Social & communication safety | Calls/SMS monitoring + blocked numbers | Win— Mac— Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-024 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.4 Social & communication safety | AI/heuristic risk signals (bullying/grooming/self-harm keywords) **opt-in** | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-025 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.5 Location & safety (mobile-first) | Live location + history | Win— Mac— Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-026 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.5 Location & safety (mobile-first) | Geofencing (home/school) arrive/leave alerts | Win— Mac— Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-027 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.5 Location & safety (mobile-first) | SOS button + optional location | Win— Mac— Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-028 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 3) Enforcement Modules > 3.5 Location & safety (mobile-first) | “I’m OK” check-in | Win— Mac— Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-029 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 4) Child-facing UX (small, clear, hard to bypass) | “Today” screen: time left, next lock, current mode | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-030 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 4) Child-facing UX (small, clear, hard to bypass) | Block screens: what’s blocked + why + next steps | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-031 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 4) Child-facing UX (small, clear, hard to bypass) | include reason | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-032 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 4) Child-facing UX (small, clear, hard to bypass) | Emergency access (Always Allowed): parent contact, emergency numbers, school essentials | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-033 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 4) Child-facing UX (small, clear, hard to bypass) | Optional “Goals & rewards” view (earned minutes) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-034 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 5) Activity Capture (privacy-first) | App usage totals + blocked attempts | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-035 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 5) Activity Capture (privacy-first) | Web domain/category totals + blocked attempts | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-036 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 5) Activity Capture (privacy-first) | Local log retention + rotation | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-037 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 5) Activity Capture (privacy-first) | Export diagnostic bundle (logs + health snapshot) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-038 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 6) Anti-tamper & resilience | Uninstall protection (best effort; OS dependent) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-039 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 6) Anti-tamper & resilience | Detect permissions removal / agent disabled + notify parent | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-040 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 6) Anti-tamper & resilience | “Fail-closed” safety mode: if agent broken, enter Restricted until parent fixes | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-041 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 6) Anti-tamper & resilience | Self-repair flows (re-pair, re-request permissions, restart agent) | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-042 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 7) Optional AI-assisted experiences (keep costs optional) | On-device heuristic suggestions (no cloud) | Win✅ Mac✅ Android✅ iOS⚠️ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
-| KFT-043 | Child App (Kids/Agent) — Master Features (Tree + Platform Compatibility) > 7) Optional AI-assisted experiences (keep costs optional) | AI-assisted request suggestion (duration/conditions) **parent must approve** | Win✅ Mac✅ Android✅ iOS✅ Web— | Win[ ] Mac[ ] Android[ ] iOS[ ] Web[ ] |
+> **Reality Rebase (additive):** This matrix reflects repo reality as of shipped patch stream **16R → 16W7a** while preserving all planned child-side features.
+
+## Shipped patches impacting Child App
+- PATCH_16U14_geofence_eval_kid_agent (agent evaluation wiring)
+- PATCH_16R_screen_time_grace_warnings_config (policy surface; enforcement may be partial)
+- PATCH_16S_per_app_limits_authoring_ui_validation (policy surface; enforcement may be partial)
+- PATCH_16T_safesearch_restricted_toggles_persisted (policy persistence; enforcement may be partial)
+
+## Child components
+- **Kid Agent (Windows-first):** enforcement + telemetry + applying grants/policies
+- **Kid UX:** child-facing UI (requests, status, “why”, etc.)
+
+## Implementation matrix
+
+| Feature ID | Component | Feature | Compatible | Status (Windows) | Notes / Patch linkage |
+|---|---|---|---|---|---|
+| K-FOUND-001 | Foundation | Consume shared contracts (DTOs/enums) | Win✅ | ✅ | Shared contracts baseline. |
+| K-SSOT-001 | SSOT | Read policy + grants from Local Control Plane | Win✅ | ✅ | Required for request loop. |
+| K-REQ-001 | Agent | Apply approved grants (time-boxed exceptions) | Win✅ | ✅ | “Request loop” baseline. |
+| K-REQ-002 | Kid UX | Create/request exceptions (child → parent) | Win✅ | ✅ | Must remain working. |
+| K-LOC-001 | Agent | Geofence evaluation (inside/outside) | Win✅ | ✅ | PATCH_16U14 |
+| K-LOC-002 | Agent | Emit geofence enter/exit events | Win✅ | ✅ | Activity events consumed by Alerts (PATCH_16U15) |
+| K-TIME-001 | Agent | Time budget enforcement (daily minutes) | Win✅ | 🟡 | Surface exists; enforcement may be staged. |
+| K-TIME-002 | Agent | Grace minutes + warnings | Win✅ | 🟡 | PATCH_16R adds config; enforcement may be partial. |
+| K-APP-001 | Agent | App allow/deny list | Win✅ | 🟡 | Planned; not fully enforced. |
+| K-APP-002 | Agent | Per-app limits | Win✅ | 🟡 | PATCH_16S improves authoring; enforcement TBD. |
+| K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | 🟡 | PATCH_16T persists toggles; enforcement TBD. |
+| K-ALERT-001 | Agent | Telemetry → Alerts/Activity pipeline | Win✅ | ✅ | Geofence activity verified; other signals planned. |
+| K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | 🟡 | Planned UX baseline; ensure no-jargon. |
+| K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Planned; part of pairing/health hardening. |
+| K-ANTITAMPER-001 | Agent | Anti-tamper stubs | Win✅ | 🟡 | Planned; not shipped. |
+
+## Notes
+- WebView2 “Tracking Prevention blocked storage” warnings are expected; **localStorage is best-effort only**.
+- Child-side must remain compatible with SSOT precedence order (Always Allowed → Grants → Mode → Schedules/Budgets).
