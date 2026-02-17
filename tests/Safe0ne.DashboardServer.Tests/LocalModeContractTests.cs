@@ -247,3 +247,72 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
     }
 
 }
+
+    [Fact]
+    public async Task PolicyRollback_IsRecommended_OnFailure_And_RollbackEndpoint_RevertsSnapshot()
+    {
+        using var client = _factory.CreateClient();
+
+        // Create a child in local mode.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Rollback Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var id = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(id));
+
+        // v2: set Lockdown
+        var put2 = await client.PutAsJsonAsync($"/api/v1/children/{id}/policy", new { mode = "Lockdown", updatedBy = "test" });
+        Assert.Equal(HttpStatusCode.OK, put2.StatusCode);
+        using var put2Doc = JsonDocument.Parse(await put2.Content.ReadAsStringAsync());
+        var v2 = put2Doc.RootElement.GetProperty("data").GetProperty("version").GetProperty("value").GetInt64();
+        Assert.True(v2 >= 2);
+
+        // Heartbeat acks v2 successfully -> sets LKG.
+        var hbOk = new
+        {
+            deviceName = "RDev",
+            agentVersion = "0.0.0-test",
+            sentAtUtc = DateTimeOffset.UtcNow,
+            lastAppliedPolicyVersion = v2,
+            lastAppliedPolicyEffectiveAtUtc = DateTimeOffset.UtcNow
+        };
+        var hbOkRes = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hbOk);
+        Assert.Equal(HttpStatusCode.OK, hbOkRes.StatusCode);
+
+        // v3: switch back to Open (creates a different snapshot)
+        var put3 = await client.PutAsJsonAsync($"/api/v1/children/{id}/policy", new { mode = "Open", updatedBy = "test" });
+        Assert.Equal(HttpStatusCode.OK, put3.StatusCode);
+        using var put3Doc = JsonDocument.Parse(await put3.Content.ReadAsStringAsync());
+        var v3 = put3Doc.RootElement.GetProperty("data").GetProperty("version").GetProperty("value").GetInt64();
+        Assert.True(v3 > v2);
+
+        // Heartbeat reports failure while still applied at v2.
+        var hbFail = new
+        {
+            deviceName = "RDev",
+            agentVersion = "0.0.0-test",
+            sentAtUtc = DateTimeOffset.UtcNow,
+            lastAppliedPolicyVersion = v2,
+            lastPolicyApplyFailedAtUtc = DateTimeOffset.UtcNow,
+            lastPolicyApplyError = "unit_test_failure"
+        };
+        var hbFailRes = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hbFail);
+        Assert.Equal(HttpStatusCode.OK, hbFailRes.StatusCode);
+
+        var st = await client.GetAsync($"/api/v1/children/{id}/status");
+        Assert.Equal(HttpStatusCode.OK, st.StatusCode);
+        using var stDoc = JsonDocument.Parse(await st.Content.ReadAsStringAsync());
+        var rec = stDoc.RootElement.GetProperty("data").GetProperty("recommendedRollbackPolicyVersion");
+        Assert.Equal(v2, rec.GetInt64());
+
+        // Trigger rollback.
+        var rb = await client.PostAsJsonAsync($"/api/v1/children/{id}/policy/rollback-last-known-good", new { updatedBy = "test" });
+        Assert.Equal(HttpStatusCode.OK, rb.StatusCode);
+        using var rbDoc = JsonDocument.Parse(await rb.Content.ReadAsStringAsync());
+        var rbMode = rbDoc.RootElement.GetProperty("data").GetProperty("mode").GetString();
+        var rbVer = rbDoc.RootElement.GetProperty("data").GetProperty("version").GetProperty("value").GetInt64();
+
+        // The snapshot was Lockdown (v2) and rollback bumps the version beyond v3.
+        Assert.Equal("Lockdown", rbMode);
+        Assert.True(rbVer > v3);
+    }

@@ -64,3 +64,17 @@ Overdue typically means the device has been offline for a while, pairing token i
 If the Kid agent observes a best-effort **apply/enforcement error**, Safe0ne records a `policy_apply_failed` activity event and surfaces the last error under Device Health.
 
 > This is an observability feature. Stronger self-repair/fail-closed behavior remains planned under EPIC-ANTITAMPER.
+
+### Rollback to last known good (recommended)
+When an apply failure is reported, Safe0ne can recommend a rollback target:
+
+- **Last known good**: the newest policy version that the device reported as successfully applied.
+- **Recommended rollback**: shown only when an apply failure occurs and a known-good snapshot exists.
+
+In the Child → **Device integrity → Policy apply** panel, you may see a **Rollback to last known good** button.
+
+What it does:
+- Restores the policy settings from the last known good snapshot.
+- Bumps the configured policy version (monotonic) so the Kid agent re-syncs and applies it.
+
+If the button is not shown, either no failure was reported, or Safe0ne does not yet have a snapshot for that version.

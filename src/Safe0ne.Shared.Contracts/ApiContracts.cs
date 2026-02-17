@@ -144,7 +144,11 @@ public sealed record ChildAgentHeartbeatRequest(
     DateTimeOffset? PolicyApplyPendingSinceUtc = null,
     bool PolicyApplyOverdue = false,
     string? PolicyApplyState = null,
-    long? LastKnownGoodPolicyVersion = null
+    long? LastKnownGoodPolicyVersion = null,
+    // 16W23: server-side rollback recommendation (SSOT hints)
+    long? RecommendedRollbackPolicyVersion = null,
+    string? RecommendedRollbackReason = null,
+    DateTimeOffset? RecommendedRollbackGeneratedAtUtc = null
 );
 
 /// <summary>

@@ -1033,11 +1033,13 @@ webCategoryRules.forEach(r => {
         <div style="font-weight:700;margin-bottom:6px;">Policy apply</div>
         <div>Last applied version: <strong>${status && status.lastAppliedPolicyVersion ? escapeHtml(String(status.lastAppliedPolicyVersion)) : "—"}</strong></div>
         <div>Applied at: <strong>${status && status.lastAppliedPolicyEffectiveAtUtc ? escapeHtml(String(status.lastAppliedPolicyEffectiveAtUtc)) : "—"}</strong></div>
+        <div>Last known good: <strong>${status && status.lastKnownGoodPolicyVersion ? escapeHtml(String(status.lastKnownGoodPolicyVersion)) : "—"}</strong></div>
         <div>Apply state: <strong>${status && status.policyApplyState ? escapeHtml(String(status.policyApplyState)) : (status && status.lastPolicyApplyFailedAtUtc ? "Failed" : "OK")}</strong>${status && status.policyApplyOverdue ? ' <span class="pill" style="margin-left:6px;">OVERDUE</span>' : ''}</div>
         <div>Pending since: <strong>${status && status.policyApplyPendingSinceUtc ? escapeHtml(String(status.policyApplyPendingSinceUtc)) : "—"}</strong></div>
         <div class="hint" style="margin-top:6px;">Watchdog: if configured policy is newer than applied for too long, we surface an overdue signal. Devices can enforce from cache; transient mismatch is expected when offline.</div>
         ${status && status.policyApplyOverdue ? '<div class="notice notice--warn" style="margin-top:8px;">Policy appears out of date on the device. If this persists, check device connectivity and pairing token status.</div>' : ''}
         ${status && status.lastPolicyApplyFailedAtUtc ? '<div class="notice notice--danger" style="margin-top:8px;">Last apply/enforcement error: <span class="mono">' + escapeHtml(String(status.lastPolicyApplyError || "unknown")) + '</span><br/><span class="muted">at ' + escapeHtml(String(status.lastPolicyApplyFailedAtUtc)) + '</span></div>' : ''}
+        ${status && status.recommendedRollbackPolicyVersion ? '<div class="notice notice--warn" style="margin-top:8px;">Recommended rollback: <span class="mono">' + escapeHtml(String(status.recommendedRollbackPolicyVersion)) + '</span><br/><span class="muted">' + escapeHtml(String(status.recommendedRollbackReason || "")) + '</span><div style="margin-top:8px;"><button class="btn" type="button" id="rollback-lkg">Rollback to last known good</button></div></div>' : ''}
       </div>
     </div>
   </div>
@@ -1072,6 +1074,30 @@ webCategoryRules.forEach(r => {
     const clearGrant = document.getElementById("clear-grant");
     const validateBox = document.getElementById("policy-validate");
     const result = document.getElementById("save-result");
+
+    // 16W23: rollback to last-known-good when apply failed and a snapshot exists.
+    const rollbackBtn = document.getElementById("rollback-lkg");
+    if (rollbackBtn){
+      rollbackBtn.addEventListener("click", async () => {
+        try{
+          rollbackBtn.disabled = true;
+          const r = await Safe0neApi.rollbackPolicyToLastKnownGood(childId, { updatedBy: "parent-ui" });
+          if (r && r.ok){
+            result.innerHTML = "<div class=\"notice notice--success\">Rolled back to last known good snapshot. Policy version bumped and will re-sync on next heartbeat.</div>";
+            // Refresh view.
+            setTimeout(() => { try{ window.location.reload(); }catch{} }, 250);
+          } else {
+            const msg = (r && r.error && r.error.message) ? r.error.message : "Rollback failed";
+            result.innerHTML = "<div class=\"notice notice--danger\">" + escapeHtml(String(msg)) + "</div>";
+            rollbackBtn.disabled = false;
+          }
+        }catch(ex){
+          result.innerHTML = "<div class=\"notice notice--danger\">Rollback failed.</div>";
+          rollbackBtn.disabled = false;
+        }
+      });
+    }
+
     const blockedEl = document.getElementById("blocked-procs");
     const appsAllowListEl = document.getElementById("apps-allowlist");
     const allowedEl = document.getElementById("allowed-procs");

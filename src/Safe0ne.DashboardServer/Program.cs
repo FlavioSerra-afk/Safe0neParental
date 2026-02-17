@@ -474,6 +474,27 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
     return Results.Json(new ApiResponse<ChildPolicy>(updated, null), JsonDefaults.Options);
 });
 
+// 16W23: server-guided rollback to last-known-good policy snapshot.
+app.MapPost( /api/{ApiVersions.V1}/children/{childId:guid}/policy/rollback-last-known-good", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    string? updatedBy = null;
+    try
+    {
+        using var doc = await JsonDocument.ParseAsync(req.Body);
+        if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("updatedBy", out var ub) && ub.ValueKind == JsonValueKind.String)
+            updatedBy = ub.GetString();
+    }
+    catch { }
+
+    if (!cp.TryRollbackPolicyToLastKnownGood(id, updatedBy, out var rolled, out var err))
+    {
+        return Results.Json(new ApiResponse<ChildPolicy>(null, new ApiError("rollback_failed", err)), JsonDefaults.Options, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    return Results.Json(new ApiResponse<ChildPolicy>(rolled, null), JsonDefaults.Options);
+});
+
 
 // --- Local Mode API (Control Plane SSOT) ---
 // vNext route surface for Parent App + Child App local communication.

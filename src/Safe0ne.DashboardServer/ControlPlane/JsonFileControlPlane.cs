@@ -28,7 +28,7 @@ public sealed class JsonFileControlPlane
         public DateTimeOffset? ArchivedAt => ArchivedAtUtc;
     }
 
-private const int CurrentSchemaVersion = 3;
+private const int CurrentSchemaVersion = 4;// 16W23: policy history for rollback support
     private const int MinSupportedSchemaVersion = 1;
 
 
@@ -38,6 +38,8 @@ private readonly object _gate = new();
     private List<ChildProfile> _children = new();
     private Dictionary<string, DateTimeOffset> _archivedAtByChildGuid = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ChildPolicy> _policiesByChildGuid = new(StringComparer.OrdinalIgnoreCase);
+    // 16W23: small rolling history per child for rollback to last-known-good.
+    private Dictionary<string, List<ChildPolicy>> _policyHistoryByChildGuid = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ChildAgentStatus> _statusByChildGuid = new(StringComparer.OrdinalIgnoreCase);
 
     
@@ -767,6 +769,11 @@ public ChildProfile CreateChild(string displayName)
                 Mode: SafetyMode.Open,
                 UpdatedAtUtc: DateTimeOffset.UtcNow,
                 UpdatedBy: "local");
+            // 16W23: initialize policy history with the seeded policy.
+            var k = id.Value.ToString();
+            if (!_policyHistoryByChildGuid.ContainsKey(k)) _policyHistoryByChildGuid[k] = new List<ChildPolicy>();
+            _policyHistoryByChildGuid[k].RemoveAll(p => p.Version.Value == 1);
+            _policyHistoryByChildGuid[k].Add(_policiesByChildGuid[k]);
         }
 
         PersistUnsafe_NoLock();
@@ -1743,6 +1750,18 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
                     BlockedProcessNames: new[] { "notepad.exe" });
             }
 
+            // 16W23: capture current policy into history before mutating.
+            if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist) || hist is null)
+            {
+                hist = new List<ChildPolicy>();
+                _policyHistoryByChildGuid[key] = hist;
+            }
+            hist.RemoveAll(p => p.Version.Value == existing.Version.Value);
+            hist.Add(existing);
+            hist.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
+            if (hist.Count > 20)
+                _policyHistoryByChildGuid[key] = hist.Skip(hist.Count - 20).ToList();
+
             // Patch semantics: optional fields override when provided.
             var alwaysAllowed = req.AlwaysAllowed ?? existing.AlwaysAllowed;
 
@@ -1816,11 +1835,84 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
 
             _policiesByChildGuid[key] = updated;
 
+            // 16W23: append updated snapshot to history (rolling).
+            if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist2) || hist2 is null)
+            {
+                hist2 = new List<ChildPolicy>();
+                _policyHistoryByChildGuid[key] = hist2;
+            }
+            hist2.RemoveAll(p => p.Version.Value == updated.Version.Value);
+            hist2.Add(updated);
+            hist2.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
+            if (hist2.Count > 20)
+                _policyHistoryByChildGuid[key] = hist2.Skip(hist2.Count - 20).ToList();
+
             EnsureChildProfileUnsafe_NoLock(childId);
             PersistUnsafe_NoLock();
             return updated;
         }
     }
+
+public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy, out ChildPolicy rolledBack, out string error)
+{
+    lock (_gate)
+    {
+        rolledBack = default!;
+        error = string.Empty;
+        var key = childId.Value.ToString();
+        if (!_policiesByChildGuid.TryGetValue(key, out var current))
+        {
+            error = "policy_not_found";
+            return false;
+        }
+        if (!_statusByChildGuid.TryGetValue(key, out var status) || status.LastKnownGoodPolicyVersion is null)
+        {
+            error = "no_last_known_good";
+            return false;
+        }
+
+        var targetVer = status.LastKnownGoodPolicyVersion.Value;
+        ChildPolicy? snapshot = null;
+
+        if (_policyHistoryByChildGuid.TryGetValue(key, out var hist) && hist is not null)
+        {
+            snapshot = hist.LastOrDefault(p => p.Version.Value == targetVer);
+        }
+        if (snapshot is null && current.Version.Value == targetVer)
+            snapshot = current;
+
+        if (snapshot is null)
+        {
+            error = "history_missing";
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        rolledBack = snapshot with
+        {
+            Version = current.Version.Next(),
+            UpdatedAtUtc = now,
+            UpdatedBy = string.IsNullOrWhiteSpace(updatedBy) ? "rollback" : updatedBy
+        };
+
+        _policiesByChildGuid[key] = rolledBack;
+
+        // Append to history (rolling).
+        if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist2) || hist2 is null)
+        {
+            hist2 = new List<ChildPolicy>();
+            _policyHistoryByChildGuid[key] = hist2;
+        }
+        hist2.RemoveAll(p => p.Version.Value == rolledBack.Version.Value);
+        hist2.Add(rolledBack);
+        hist2.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
+        if (hist2.Count > 20)
+            _policyHistoryByChildGuid[key] = hist2.Skip(hist2.Count - 20).ToList();
+
+        PersistUnsafe_NoLock();
+        return true;
+    }
+}
 
     private void LoadOrSeed()
     {
@@ -1864,6 +1956,34 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
 
                 _policiesByChildGuid = state.Policies
                     .ToDictionary(p => p.ChildId.Value.ToString(), p => p, StringComparer.OrdinalIgnoreCase);
+
+                // 16W23: load policy history (optional).
+                _policyHistoryByChildGuid = new Dictionary<string, List<ChildPolicy>>(StringComparer.OrdinalIgnoreCase);
+                if (state.PolicyHistory is not null)
+                {
+                    foreach (var ph in state.PolicyHistory)
+                    {
+                        var kk = ph.ChildId.Value.ToString();
+                        _policyHistoryByChildGuid[kk] = ph.Policies ?? new List<ChildPolicy>();
+                    }
+                }
+                // Ensure every child has at least its current policy in history.
+                foreach (var kvp in _policiesByChildGuid)
+                {
+                    if (!_policyHistoryByChildGuid.TryGetValue(kvp.Key, out var list) || list is null)
+                    {
+                        list = new List<ChildPolicy>();
+                        _policyHistoryByChildGuid[kvp.Key] = list;
+                    }
+                    if (!list.Any(p => p.Version.Value == kvp.Value.Version.Value))
+                    {
+                        list.Add(kvp.Value);
+                    }
+                    // cap to the newest 20 versions
+                    list.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
+                    if (list.Count > 20)
+                        _policyHistoryByChildGuid[kvp.Key] = list.Skip(list.Count - 20).ToList();
+                }
 
                 _statusByChildGuid = (state.Statuses ?? new List<ChildAgentStatus>())
                     .ToDictionary(s => s.ChildId.Value.ToString(), s => s, StringComparer.OrdinalIgnoreCase);
@@ -1958,6 +2078,10 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
             .Select(kvp => new ChildCommandsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value))
             .ToList();
 
+        var policyHistory = _policyHistoryByChildGuid
+            .Select(kvp => new PolicyHistoryState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value))
+            .ToList();
+
         var state = new ControlPlaneState(
             Children: _children,
             Policies: _policiesByChildGuid.Values.ToList(),
@@ -1973,6 +2097,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
             LocalSettingsProfiles: _localSettingsProfileJsonByChildGuid.Select(kvp => new LocalSettingsProfileState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalActivityEvents: _localActivityEventsJsonByChildGuid.Select(kvp => new LocalActivityEventsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalLocations: _localLastLocationJsonByChildGuid.Select(kvp => new LocalLocationState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
+            PolicyHistory: policyHistory,
             SchemaVersion: CurrentSchemaVersion
         );
 
@@ -2140,6 +2265,11 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         ChildId ChildId,
         List<ChildCommand> Commands);
 
+    // 16W23: rolling policy snapshots for rollback.
+    private sealed record PolicyHistoryState(
+        ChildId ChildId,
+        List<ChildPolicy> Policies);
+
     private sealed record ControlPlaneState(
         List<ChildProfile> Children,
         List<ChildPolicy> Policies,
@@ -2158,6 +2288,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         List<LocalSettingsProfileState>? LocalSettingsProfiles = null,
         List<LocalActivityEventsState>? LocalActivityEvents = null,
         List<LocalLocationState>? LocalLocations = null,
+        List<PolicyHistoryState>? PolicyHistory = null,
         int SchemaVersion = CurrentSchemaVersion);
 
     private sealed record LocalLocationState(

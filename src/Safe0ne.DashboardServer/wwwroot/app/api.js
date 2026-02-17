@@ -108,6 +108,11 @@ const Safe0neApi = {
     // payload supports: mode, updatedBy, alwaysAllowed, grantMinutes
     return await _put(`/api/v1/children/${encodeURIComponent(childId)}/policy`, payload);
   },
+
+  // 16W23: rollback to last known good policy snapshot (server-side).
+  async rollbackPolicyToLastKnownGood(childId, payload){
+    return await _post(`/api/v1/children/${encodeURIComponent(childId)}/policy/rollback-last-known-good`, payload || {});
+  },
   // P11: Requests inbox + decision loop.
   async getRequests(childId, status, take){
     const params = [];

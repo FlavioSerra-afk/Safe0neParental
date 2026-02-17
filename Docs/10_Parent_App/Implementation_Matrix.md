@@ -50,6 +50,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-FOUND-002 | Foundation | Local Control Plane API stubs (children list + policy read/write) | Win✅ | ✅ | SSOT/local-first established. |
 | P-FOUND-003 | Foundation | Versioned policy model (`PolicyVersion` monotonic) | Win✅ | ✅ | Mentioned in shared SSOT doc. |
 | P-POLICY-SYNC-001 | Policy | Policy apply observability (configured vs applied + pending/overdue) | Win✅ | 🟡 | 16W19: applied version surfaced. 16W21: watchdog pendingSince + overdue signal. |
+| P-POLICY-SYNC-002 | Policy | Rollback to last-known-good on apply failure (recommend + action) | Win✅ | 🟡 | 16W23: server recommendation + rollback endpoint + UI button; stores rolling policy history. |
 | P-UI-001 | Shell | WPF + WebView2 host + navigation scaffold | Win✅ | ✅ | Parent App shell operational. |
 | P-CHILD-001 | Children | Children list/cards | Win✅ | ✅ | **Never regress**. |
 | P-CHILD-002 | Children | Add Child modal flow | Win✅ | ✅ | **Never regress**. |
