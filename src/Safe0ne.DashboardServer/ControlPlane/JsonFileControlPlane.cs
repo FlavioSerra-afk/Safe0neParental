@@ -53,10 +53,6 @@ private readonly object _gate = new();
 
 // K1: per-child paired devices and pending pairing codes.
     private Dictionary<string, List<PairedDevice>> _devicesByChildGuid = new(StringComparer.OrdinalIgnoreCase);
-    // 16W12: track recent device auth failures per child (best-effort; used for health attention).
-    private Dictionary<string, DeviceAuthFailureState> _deviceAuthFailuresByChildGuid = new(StringComparer.OrdinalIgnoreCase);
-
-    private sealed record DeviceAuthFailureState(DateTimeOffset LastFailureUtc, int Count);
     private Dictionary<string, PendingPairing> _pendingPairingByChildGuid = new(StringComparer.OrdinalIgnoreCase);
 
     // K2: queued commands (control plane -> agent).
@@ -913,92 +909,17 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 return Array.Empty<ChildDeviceSummary>();
             }
 
-            var nowUtc = DateTimeOffset.UtcNow;
-
-            _deviceAuthFailuresByChildGuid.TryGetValue(key, out var authFail);
-            var lastAuthFailUtc = authFail?.LastFailureUtc;
-
             return devices
-                .Select(d =>
-                {
-                    var isOnline = d.LastSeenUtc.HasValue && (nowUtc - d.LastSeenUtc.Value) < TimeSpan.FromMinutes(3);
-                    var attention = !d.LastSeenUtc.HasValue ? "Never seen" : ((nowUtc - d.LastSeenUtc.Value) >= TimeSpan.FromMinutes(3) ? "Stale" : null);
-                    if (lastAuthFailUtc.HasValue && (nowUtc - lastAuthFailUtc.Value) < TimeSpan.FromMinutes(30))
-                    {
-                        attention = attention ?? "Auth issue";
-                    }
-                    var health = attention is null ? (isOnline ? "Online" : "Offline") : "Attention";
-                    return new ChildDeviceSummary(
-                        DeviceId: d.DeviceId,
-                        DeviceName: d.DeviceName,
-                        AgentVersion: d.AgentVersion,
-                        PairedAtUtc: d.PairedAtUtc,
-                        LastSeenUtc: d.LastSeenUtc,
-                        IsOnline: isOnline,
-                        Health: health,
-                        AttentionReason: attention,
-                        LastAuthFailureUtc: lastAuthFailUtc);
-                })
+                .Select(d => new ChildDeviceSummary(
+                    DeviceId: d.DeviceId,
+                    DeviceName: d.DeviceName,
+                    AgentVersion: d.AgentVersion,
+                    PairedAtUtc: d.PairedAtUtc,
+                    LastSeenUtc: d.LastSeenUtc))
                 .ToList();
         }
     }
 
-
-public void RecordDeviceAuthFailure(ChildId childId, DateTimeOffset nowUtc)
-{
-    lock (_gate)
-    {
-        var key = childId.Value.ToString();
-        if (_deviceAuthFailuresByChildGuid.TryGetValue(key, out var cur))
-        {
-            _deviceAuthFailuresByChildGuid[key] = cur with { LastFailureUtc = nowUtc, Count = cur.Count + 1 };
-        }
-        else
-        {
-            _deviceAuthFailuresByChildGuid[key] = new DeviceAuthFailureState(nowUtc, 1);
-        }
-        PersistUnsafe_NoLock();
-    }
-}
-
-public void SweepDeviceHealth(DateTimeOffset nowUtc, TimeSpan offlineThreshold)
-{
-    lock (_gate)
-    {
-        foreach (var kvp in _devicesByChildGuid)
-        {
-            var childKey = kvp.Key;
-            var devices = kvp.Value;
-            if (devices.Count == 0) continue;
-
-            var anyChanged = false;
-            for (var i = 0; i < devices.Count; i++)
-            {
-                var cur = devices[i];
-                var wasOnline = cur.LastDerivedOnline;
-                var lastSeen = cur.LastSeenUtc;
-                var isOnline = lastSeen.HasValue && (nowUtc - lastSeen.Value) < offlineThreshold;
-
-                // Offline transition is time-based; emit when we observe the transition during sweep.
-                if (wasOnline && !isOnline)
-                {
-                    devices[i] = cur with { LastDerivedOnline = false, LastStatusChangedUtc = nowUtc };
-                    anyChanged = true;
-
-                    AppendLocalActivityJsonUnsafe_NoLock(childKey, JsonSerializer.Serialize(new[]
-                    {
-                        new { @event = "Device", item = cur.DeviceName, time = nowUtc.UtcDateTime.ToString("u"), status = "Offline" }
-                    }, JsonDefaults.Options));
-                }
-            }
-
-            if (anyChanged)
-            {
-                PersistUnsafe_NoLock();
-            }
-        }
-    }
-}
     public bool HasPairedDevices(ChildId childId)
     {
         lock (_gate)
@@ -1222,38 +1143,27 @@ public void SweepDeviceHealth(DateTimeOffset nowUtc, TimeSpan offlineThreshold)
 
             // Device health: if this heartbeat is authenticated to a specific enrolled device, update per-device last-seen.
             if (authenticated && deviceId is not null)
-{
-    if (_devicesByChildGuid.TryGetValue(key, out var devs))
-    {
-        var idx = devs.FindIndex(d => d.DeviceId == deviceId.Value);
-        if (idx >= 0)
-        {
-            var cur = devs[idx];
-            var prevOnline = cur.LastDerivedOnline || (cur.LastSeenUtc.HasValue && (nowUtc - cur.LastSeenUtc.Value) < TimeSpan.FromMinutes(3));
-
-            devs[idx] = cur with
             {
-                AgentVersion = req.AgentVersion ?? cur.AgentVersion,
-                LastSeenUtc = nowUtc,
-                LastDerivedOnline = true,
-                LastStatusChangedUtc = prevOnline ? cur.LastStatusChangedUtc : nowUtc
-            };
-
-            // Online transition is event-based (on authenticated heartbeat).
-            if (!prevOnline)
-            {
-                AppendLocalActivityJsonUnsafe_NoLock(key, JsonSerializer.Serialize(new[]
+                if (_devicesByChildGuid.TryGetValue(key, out var devs))
                 {
-                    new { @event = "Device", item = cur.DeviceName, time = nowUtc.UtcDateTime.ToString("u"), status = "Online" }
-                }, JsonDefaults.Options));
+                    var idx = devs.FindIndex(d => d.DeviceId == deviceId.Value);
+                    if (idx >= 0)
+                    {
+                        var cur = devs[idx];
+                        devs[idx] = cur with
+                        {
+                            AgentVersion = req.AgentVersion ?? cur.AgentVersion,
+                            LastSeenUtc = nowUtc
+                        };
+                    }
+                }
             }
-        }
-    }
-}var status = new ChildAgentStatus(
+
+            var status = new ChildAgentStatus(
                 ChildId: childId,
                 LastSeenUtc: nowUtc,
                 DeviceName: req.DeviceName,
-                AgentVersion: req.AgentVersion,
+                AgentVersion: req.AgentVersion ?? (deviceId is not null ? devs.FirstOrDefault(d => d.DeviceId == deviceId)?.AgentVersion : null) ?? "unknown",
                 EffectiveMode: effective.EffectiveMode,
                 ReasonCode: effective.ReasonCode,
                 PolicyVersion: effective.PolicyVersion,
@@ -1817,9 +1727,6 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
                 _localLastLocationJsonByChildGuid = (state.LocalLocations ?? new List<LocalLocationState>())
                     .ToDictionary(a => a.ChildId.Value.ToString(), a => a.LocationJson, StringComparer.OrdinalIgnoreCase);
 
-                _deviceAuthFailuresByChildGuid = (state.DeviceAuthFailures ?? new List<DeviceAuthFailurePersistedState>())
-                    .ToDictionary(a => a.ChildId.Value.ToString(), a => new DeviceAuthFailureState(a.LastFailureUtc, a.Count), StringComparer.OrdinalIgnoreCase);
-
 
                 _policiesByChildGuid = state.Policies
                     .ToDictionary(p => p.ChildId.Value.ToString(), p => p, StringComparer.OrdinalIgnoreCase);
@@ -1996,9 +1903,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
         string TokenHashSha256,
-        DateTimeOffset? LastSeenUtc = null,
-        bool LastDerivedOnline = false,
-        DateTimeOffset? LastStatusChangedUtc = null);
+        DateTimeOffset? LastSeenUtc = null);
 
     private sealed record PendingPairing(
         ChildId ChildId,
@@ -2027,11 +1932,6 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         ChildId ChildId,
         string EventsJson);
 
-    private sealed record DeviceAuthFailurePersistedState(
-        ChildId ChildId,
-        DateTimeOffset LastFailureUtc,
-        int Count);
-
     private sealed record ChildCommandsState(
         ChildId ChildId,
         List<ChildCommand> Commands);
@@ -2054,7 +1954,6 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         List<LocalSettingsProfileState>? LocalSettingsProfiles = null,
         List<LocalActivityEventsState>? LocalActivityEvents = null,
         List<LocalLocationState>? LocalLocations = null,
-        List<DeviceAuthFailurePersistedState>? DeviceAuthFailures = null,
         int SchemaVersion = CurrentSchemaVersion);
 
     private sealed record LocalLocationState(
