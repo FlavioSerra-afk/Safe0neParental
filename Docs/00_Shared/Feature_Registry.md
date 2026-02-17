@@ -40,19 +40,20 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-LOCATION-GEOFENCE | Location | Geofence authoring + overlay + evaluation + alerts | ✅ | Parent: geofence overlay UX; Kid: eval; Alerts: activity | SSOT: geofence config + event stream | Implemented 16U13–16U15 |
 | EPIC-ALERTS-INBOX | Alerts | Alerts inbox: routing + grouping + ack | ✅ | Parent: Alerts inbox UI + ack | SSOT: alert routing/config + ack endpoints | Self-test PASS restored in 16W7a |
 | EPIC-REPORTS | Reports | Reports scheduling | 🟡 | Parent: reports scheduling surface | SSOT: report schedules (stub) | 16W7 = stub only |
-| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Parent: pairing UX + device registry; Kid: pairing endpoint stub | SSOT: device registry + enrollment tokens; **token revoke + expiry**; deeplink copy | Implemented in 16W10–16W14 (minimal); hardened in 16W20 (token revoke/expiry); polished in 16W22 (deeplink + re-pair UX) |
-| EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🟡 | 16W19: policyVersion bump on save + agent ack persisted + UI surfaces applied version. 16W21: watchdog surfaces Pending/Overdue state + pendingSince. 16W23: rollback recommendation + rollback endpoint (last-known-good snapshot). Integrity still planned. | SSOT: policy versions + heartbeat | KFT-006 (partial) |
+| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Parent: pairing UX + device registry; Kid: pairing endpoint stub | SSOT: device registry + enrollment tokens | Implemented in 16W10–16W14 (minimal) |
+| EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🔴 | Kid agent | SSOT: policy versions + heartbeat | Planned in KFT-006+ |
 | EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
 | EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
-| EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Blocked attempts now surface as web alerts; category "Alert" remains future increment |
+| EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🔴 | Kid UX | SSOT: policy + runtime state | Planned in KFT-029+ |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |
 | EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | 🟡 | Parent: audit viewer + append on saves | SSOT: append-only audit | 16W8: implemented minimal audit log; expand filters/export later |
-| EPIC-ENG-MODULARITY | Architecture | ControlPlane modularization (partial split by domain) | 🟡 | Dev/maintainability | SSOT: ControlPlane remains single authority; code split only | 16W27: extracted Token/Crypto helpers to partial; continue domain splits to reduce patch risk |
 
 ## How to update this registry (every patch)
 1. Identify affected epic(s) and specific features.
 2. Update **Status** + **Evidence**.
 3. Update the matching **User Manual** section under `Docs/90_User_Manual/`.
 4. Ensure marker/self-tests remain green.
+
+- 🟡 ENG: ControlPlane partial split — extracted Policy domain to JsonFileControlPlane.Policy.cs (seed)

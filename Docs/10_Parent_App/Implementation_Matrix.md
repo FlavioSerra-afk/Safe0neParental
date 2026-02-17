@@ -30,12 +30,6 @@ Legend:
 - PATCH_16W6_alerts_inbox_compact_grouped
 - PATCH_16W7_reports_scheduling_stub
 - PATCH_16W7a_alerts_js_syntax_fix
-- PATCH_16W18_device_health_fixit_docs
-- PATCH_16W19_policy_sync_versioning_hardening
-- PATCH_16W19B_childagent_build_fix
-- PATCH_16W20_pairing_token_ttl_revoke
-- PATCH_16W21_policy_sync_watchdog_overdue
-- PATCH_16W24_web_filter_alerts_activity
 
 ## Compatibility assumptions
 Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are planning markers only.
@@ -47,12 +41,10 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 
 | Feature ID | Area | Feature | Compatible | Status (PC) | Notes / Patch linkage |
 |---|---|---|---|---|---|
+| P-ENG-CP-POLICY | ControlPlane split: Policy partial | 🟡 | Extract policy versioning into JsonFileControlPlane.Policy.cs |
 | P-FOUND-001 | Foundation | Shared contracts (DTOs/enums) for Parent + Local Service | Win✅ | ✅ | Present in repo; baseline foundation. |
 | P-FOUND-002 | Foundation | Local Control Plane API stubs (children list + policy read/write) | Win✅ | ✅ | SSOT/local-first established. |
 | P-FOUND-003 | Foundation | Versioned policy model (`PolicyVersion` monotonic) | Win✅ | ✅ | Mentioned in shared SSOT doc. |
-| P-ENG-CP-001 | Engineering | ControlPlane modularization: split JsonFileControlPlane into partial files by domain (no behavior change) | Win✅ | 🟡 | 16W27: Token/Crypto helpers extracted into partial; continue by domain to reduce patch risk. |
-| P-POLICY-SYNC-001 | Policy | Policy apply observability (configured vs applied + pending/overdue) | Win✅ | 🟡 | 16W19: applied version surfaced. 16W21: watchdog pendingSince + overdue signal. |
-| P-POLICY-SYNC-002 | Policy | Rollback to last-known-good on apply failure (recommend + action) | Win✅ | 🟡 | 16W23: server recommendation + rollback endpoint + UI button; stores rolling policy history. |
 | P-UI-001 | Shell | WPF + WebView2 host + navigation scaffold | Win✅ | ✅ | Parent App shell operational. |
 | P-CHILD-001 | Children | Children list/cards | Win✅ | ✅ | **Never regress**. |
 | P-CHILD-002 | Children | Add Child modal flow | Win✅ | ✅ | **Never regress**. |
@@ -72,10 +64,9 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-POL-001 | Policies | Screen time grace + warnings config | Win✅ | ✅ | PATCH_16R |
 | P-POL-002 | Policies | Per-app limits authoring UI validation | Win✅ | ✅ | PATCH_16S |
 | P-POL-003 | Policies | SafeSearch / Restricted toggles persisted | Win✅ | ✅ | PATCH_16T |
-| P-POL-004 | Policies | Policy apply status: last applied version + timestamp per device (observable) | Win✅ | 🟡 | PATCH_16W19 |
 | P-LOC-001 | Location | Geofence overlay UX in child profile | Win✅ | ✅ | PATCH_16U13 → 16U13d |
 | P-LOC-002 | Location | Geofence transitions emitted as Alerts/Activity | Win✅ | ✅ | PATCH_16U15 |
-| P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | Local pairing + device list implemented; 16W20 adds token revoke + expiry surfaces; 16W22 adds pairing deeplink copy + per-device re-pair action. QR image generation remains planned. |
+| P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | Planned; visible in matrices but not fully implemented. |
 | P-HEALTH-001 | Devices | Device health (heartbeat/last seen) | Win✅ | 🟡 | Planned; see backlog. |
 | P-ANTITAMPER-001 | Security | Anti-tamper resilience (stubs) | Win✅ | 🟡 | 16W15–16W17: tamper/circumvention surfaced + alerts + policy gates; enforcement/self-repair still TBD. |
 | P-AUDIT-001 | Compliance | Append-only audit log for policy changes | Win✅ | 🔴 | Planned next: **PATCH_16W8** (proposal only). |

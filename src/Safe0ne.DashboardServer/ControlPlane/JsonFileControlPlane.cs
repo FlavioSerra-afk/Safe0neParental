@@ -28,7 +28,7 @@ public sealed partial class JsonFileControlPlane
         public DateTimeOffset? ArchivedAt => ArchivedAtUtc;
     }
 
-private const int CurrentSchemaVersion = 4;// 16W23: policy history for rollback support
+private const int CurrentSchemaVersion = 2;
     private const int MinSupportedSchemaVersion = 1;
 
 
@@ -38,8 +38,6 @@ private readonly object _gate = new();
     private List<ChildProfile> _children = new();
     private Dictionary<string, DateTimeOffset> _archivedAtByChildGuid = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ChildPolicy> _policiesByChildGuid = new(StringComparer.OrdinalIgnoreCase);
-    // 16W23: small rolling history per child for rollback to last-known-good.
-    private Dictionary<string, List<ChildPolicy>> _policyHistoryByChildGuid = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ChildAgentStatus> _statusByChildGuid = new(StringComparer.OrdinalIgnoreCase);
 
     
@@ -418,7 +416,6 @@ public IReadOnlyList<LocalChildSnapshot> GetChildrenWithArchiveState(bool includ
     public void UpsertLocalChildMetaJson(ChildId childId, string metaJson)
     {
         var key = childId.Value.ToString();
-
         lock (_gate)
         {
             _localChildMetaJsonByChildGuid[key] = metaJson ?? "{}";
@@ -453,117 +450,7 @@ public IReadOnlyList<LocalChildSnapshot> GetChildrenWithArchiveState(bool includ
         }
     }
 
-    public void UpsertLocalSettingsProfileJson(ChildId childId, string profileJson, bool bumpPolicyVersionOnPolicyChange = true)
-    {
-        var key = childId.Value.ToString();
-        lock (_gate)
-        {
-            var incoming = NormalizeLocalSettingsProfileJson(key, profileJson ?? "{}");
 
-            if (!bumpPolicyVersionOnPolicyChange)
-            {
-                _localSettingsProfileJsonByChildGuid[key] = incoming;
-                PersistUnsafe_NoLock();
-                return;
-            }
-
-            var existing = _localSettingsProfileJsonByChildGuid.TryGetValue(key, out var cur) && !string.IsNullOrWhiteSpace(cur)
-                ? cur
-                : null;
-
-            // Policy versioning is additive-only and must remain monotonic.
-            // We bump policyVersion ONLY when the policy surface changes ("policy" object).
-            // Other profile writes (e.g., geofence state, diagnostics) should opt out using bumpPolicyVersionOnPolicyChange: false.
-
-            static int ReadPolicyVersion(JsonElement root)
-            {
-                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("policyVersion", out var pv) && pv.ValueKind == JsonValueKind.Number && pv.TryGetInt32(out var i))
-                    return i;
-                return 1;
-            }
-
-            static string? ReadEffectiveAtUtc(JsonElement root)
-            {
-                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("effectiveAtUtc", out var ea) && ea.ValueKind == JsonValueKind.String)
-                    return ea.GetString();
-                return null;
-            }
-
-            static string ReadPolicyRaw(JsonElement root)
-            {
-                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("policy", out var p) && p.ValueKind == JsonValueKind.Object)
-                    return p.GetRawText();
-                return "{}";
-            }
-
-            bool policyChanged = false;
-            int existingVersion = 1;
-            string? existingEffectiveAt = null;
-
-            if (existing is not null)
-            {
-                try
-                {
-                    using var curDoc = JsonDocument.Parse(existing);
-                    existingVersion = ReadPolicyVersion(curDoc.RootElement);
-                    existingEffectiveAt = ReadEffectiveAtUtc(curDoc.RootElement);
-                    var curPolicy = ReadPolicyRaw(curDoc.RootElement);
-
-                    using var incDoc = JsonDocument.Parse(incoming);
-                    var incPolicy = ReadPolicyRaw(incDoc.RootElement);
-                    policyChanged = !string.Equals(curPolicy, incPolicy, StringComparison.Ordinal);
-                }
-                catch
-                {
-                    // If we can't parse, fall back to a conservative bump.
-                    policyChanged = true;
-                }
-            }
-            else
-            {
-                // First write: do not bump unless incoming already has a version.
-                policyChanged = false;
-            }
-
-            // Normalize monotonicity + bump on policy changes.
-            try
-            {
-                using var incDoc = JsonDocument.Parse(incoming);
-                var incomingVersion = ReadPolicyVersion(incDoc.RootElement);
-
-                // If policy didn't change, enforce monotonic non-decreasing version.
-                if (!policyChanged && existing is not null && incomingVersion < existingVersion)
-                {
-                    var node = JsonNode.Parse(incoming) as JsonObject ?? new JsonObject();
-                    node["policyVersion"] = existingVersion;
-                    if (existingEffectiveAt is not null && (!node.TryGetPropertyValue("effectiveAtUtc", out var ea) || ea is null))
-                        node["effectiveAtUtc"] = existingEffectiveAt;
-                    incoming = NormalizeLocalSettingsProfileJson(key, node.ToJsonString(JsonDefaults.Options));
-                }
-                else if (policyChanged)
-                {
-                    var node = JsonNode.Parse(incoming) as JsonObject ?? new JsonObject();
-
-                    // Bump from the existing version when possible; otherwise bump from incoming.
-                    var newVersion = existing is null
-                        ? Math.Max(1, incomingVersion)
-                        : Math.Max(existingVersion + 1, incomingVersion);
-
-                    node["policyVersion"] = newVersion;
-                    node["effectiveAtUtc"] = DateTimeOffset.UtcNow.ToString("O");
-
-                    incoming = NormalizeLocalSettingsProfileJson(key, node.ToJsonString(JsonDefaults.Options));
-                }
-            }
-            catch
-            {
-                // If we fail to parse/mutate, store the normalized incoming to avoid breaking the flow.
-            }
-
-            _localSettingsProfileJsonByChildGuid[key] = incoming;
-            PersistUnsafe_NoLock();
-        }
-    }
 
     // Local Mode Activity: append/query child activity events.
     // Activity is stored as a JSON array per child for flexibility and forward-compat.
@@ -769,11 +656,6 @@ public ChildProfile CreateChild(string displayName)
                 Mode: SafetyMode.Open,
                 UpdatedAtUtc: DateTimeOffset.UtcNow,
                 UpdatedBy: "local");
-            // 16W23: initialize policy history with the seeded policy.
-            var k = id.Value.ToString();
-            if (!_policyHistoryByChildGuid.ContainsKey(k)) _policyHistoryByChildGuid[k] = new List<ChildPolicy>();
-            _policyHistoryByChildGuid[k].RemoveAll(p => p.Version.Value == 1);
-            _policyHistoryByChildGuid[k].Add(_policiesByChildGuid[k]);
         }
 
         PersistUnsafe_NoLock();
@@ -872,36 +754,6 @@ public bool TryUnpairDevice(Guid deviceId, out ChildId childId)
     }
 }
 
-public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId childId)
-{
-    lock (_gate)
-    {
-        childId = default;
-        foreach (var kvp in _devicesByChildGuid)
-        {
-            var devices = kvp.Value;
-            var idx = devices.FindIndex(d => d.DeviceId == deviceId);
-            if (idx < 0) continue;
-
-            var cur = devices[idx];
-            if (cur.TokenRevokedAtUtc is null)
-            {
-                devices[idx] = cur with
-                {
-                    TokenRevokedAtUtc = DateTimeOffset.UtcNow,
-                    TokenRevokedBy = string.IsNullOrWhiteSpace(revokedBy) ? "parent" : revokedBy.Trim()
-                };
-                PersistUnsafe_NoLock();
-            }
-
-            childId = new ChildId(Guid.Parse(kvp.Key));
-            return true;
-        }
-
-        return false;
-    }
-}
-
 public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
 {
     lock (_gate)
@@ -953,27 +805,13 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 lastSeen = s.LastSeenUtc;
             }
 
-            var now = DateTimeOffset.UtcNow;
             return devices
-                .Select(d =>
-                {
-                    var issuedAt = d.TokenIssuedAtUtc == default ? d.PairedAtUtc : d.TokenIssuedAtUtc;
-                    var expiresAt = d.TokenExpiresAtUtc == default ? issuedAt.Add(GetDeviceTokenTtl()) : d.TokenExpiresAtUtc;
-                    var revoked = d.TokenRevokedAtUtc is not null;
-                    var expired = expiresAt <= now;
-                    return new ChildDeviceSummary(
-                        DeviceId: d.DeviceId,
-                        DeviceName: d.DeviceName,
-                        AgentVersion: d.AgentVersion,
-                        PairedAtUtc: d.PairedAtUtc,
-                        LastSeenUtc: lastSeen,
-                        TokenIssuedAtUtc: issuedAt,
-                        TokenExpiresAtUtc: expiresAt,
-                        TokenRevokedAtUtc: d.TokenRevokedAtUtc,
-                        TokenRevokedBy: d.TokenRevokedBy,
-                        TokenExpired: expired,
-                        TokenRevoked: revoked);
-                })
+                .Select(d => new ChildDeviceSummary(
+                    DeviceId: d.DeviceId,
+                    DeviceName: d.DeviceName,
+                    AgentVersion: d.AgentVersion,
+                    PairedAtUtc: d.PairedAtUtc,
+                    LastSeenUtc: lastSeen))
                 .ToList();
         }
     }
@@ -1001,20 +839,6 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var hash = ComputeSha256Hex(token);
             var match = devices.FirstOrDefault(d => string.Equals(d.TokenHashSha256, hash, StringComparison.OrdinalIgnoreCase));
             if (match is null)
-            {
-                return false;
-            }
-
-            // Pairing hardening: token can be revoked or expired.
-            var now = DateTimeOffset.UtcNow;
-            if (match.TokenRevokedAtUtc is not null)
-            {
-                return false;
-            }
-            var issuedAt = match.TokenIssuedAtUtc == default ? match.PairedAtUtc : match.TokenIssuedAtUtc;
-            var expiresAt = match.TokenExpiresAtUtc == default ? issuedAt.Add(GetDeviceTokenTtl()) : match.TokenExpiresAtUtc;
-
-            if (expiresAt <= now)
             {
                 return false;
             }
@@ -1144,19 +968,12 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 deviceId = Guid.NewGuid();
             }
 
-            var issuedAt = DateTimeOffset.UtcNow;
-            var expiresAt = issuedAt.Add(GetDeviceTokenTtl());
-
             devices.Add(new PairedDevice(
                 DeviceId: deviceId,
                 DeviceName: deviceName,
                 AgentVersion: agentVersion,
-                PairedAtUtc: issuedAt,
-                TokenHashSha256: tokenHash,
-                TokenIssuedAtUtc: issuedAt,
-                TokenExpiresAtUtc: expiresAt,
-                TokenRevokedAtUtc: null,
-                TokenRevokedBy: null));
+                PairedAtUtc: DateTimeOffset.UtcNow,
+                TokenHashSha256: tokenHash));
 
             // One-time code is consumed.
             _pendingPairingByChildGuid.Remove(key);
@@ -1164,7 +981,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             EnsureChildProfileUnsafe_NoLock(childId);
             PersistUnsafe_NoLock();
 
-            return new PairingCompleteResponse(childId, deviceId, token, issuedAt);
+            return new PairingCompleteResponse(childId, deviceId, token, DateTimeOffset.UtcNow);
         }
     }
 
@@ -1173,30 +990,6 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
         lock (_gate)
         {
             var key = childId.Value.ToString();
-
-            // 16W19: persist policy apply acknowledgements from the agent (extra fields in heartbeat).
-            // If the agent omits these fields this tick, we preserve the last-known values.
-            var priorStatus = _statusByChildGuid.TryGetValue(key, out var prior0) ? prior0 : null;
-
-            var lastAppliedPolicyVersion = req.LastAppliedPolicyVersion ?? priorStatus?.LastAppliedPolicyVersion;
-            var lastAppliedPolicyEffectiveAtUtc = req.LastAppliedPolicyEffectiveAtUtc ?? priorStatus?.LastAppliedPolicyEffectiveAtUtc;
-            var lastAppliedPolicyFingerprint = !string.IsNullOrWhiteSpace(req.LastAppliedPolicyFingerprint) ? req.LastAppliedPolicyFingerprint : priorStatus?.LastAppliedPolicyFingerprint;
-
-            var lastPolicyApplyFailedAtUtc = req.LastPolicyApplyFailedAtUtc ?? priorStatus?.LastPolicyApplyFailedAtUtc;
-            var lastPolicyApplyError = !string.IsNullOrWhiteSpace(req.LastPolicyApplyError) ? req.LastPolicyApplyError : priorStatus?.LastPolicyApplyError;
-
-
-            // 16W21: watchdog computed fields (persisted for parent UX).
-            var now = DateTimeOffset.UtcNow;
-            var desiredPolicyVersion = effective.PolicyVersion.Value;
-            var appliedPolicyVersion = lastAppliedPolicyVersion;
-
-            var policyPending = appliedPolicyVersion is null || appliedPolicyVersion.Value < desiredPolicyVersion;
-            var pendingSince = policyPending ? (DateTimeOffset?)(priorStatus?.PolicyApplyPendingSinceUtc ?? now) : null;
-            var overdue = policyPending && pendingSince is not null && (now - pendingSince.Value) >= GetPolicyWatchdogThreshold();
-
-            var failedRecent = lastPolicyApplyFailedAtUtc is not null && (now - lastPolicyApplyFailedAtUtc.Value) < TimeSpan.FromMinutes(30);
-            var policyApplyState = failedRecent && policyPending ? "Failed" : (overdue ? "Overdue" : (policyPending ? "Pending" : "UpToDate"));
 
             // K4: Store a privacy-first screen time summary for parent reporting.
             _policiesByChildGuid.TryGetValue(key, out var policy);
@@ -1304,16 +1097,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 WebTopBlockedDomains: webTopBlocked,
                 WebAlertsToday: webAlerts,
                 Circumvention: circumvention,
-                Tamper: tamper,
-                LastAppliedPolicyVersion: lastAppliedPolicyVersion,
-                LastAppliedPolicyEffectiveAtUtc: lastAppliedPolicyEffectiveAtUtc,
-                LastAppliedPolicyFingerprint: lastAppliedPolicyFingerprint,
-                LastPolicyApplyFailedAtUtc: lastPolicyApplyFailedAtUtc,
-                LastPolicyApplyError: lastPolicyApplyError,
-                PolicyApplyPendingSinceUtc: pendingSince,
-                PolicyApplyOverdue: overdue,
-                PolicyApplyState: policyApplyState,
-                LastKnownGoodPolicyVersion: lastAppliedPolicyVersion);
+                Tamper: tamper);
 
             _statusByChildGuid[key] = status;
 
@@ -1750,18 +1534,6 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
                     BlockedProcessNames: new[] { "notepad.exe" });
             }
 
-            // 16W23: capture current policy into history before mutating.
-            if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist) || hist is null)
-            {
-                hist = new List<ChildPolicy>();
-                _policyHistoryByChildGuid[key] = hist;
-            }
-            hist.RemoveAll(p => p.Version.Value == existing.Version.Value);
-            hist.Add(existing);
-            hist.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
-            if (hist.Count > 20)
-                _policyHistoryByChildGuid[key] = hist.Skip(hist.Count - 20).ToList();
-
             // Patch semantics: optional fields override when provided.
             var alwaysAllowed = req.AlwaysAllowed ?? existing.AlwaysAllowed;
 
@@ -1835,86 +1607,11 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
 
             _policiesByChildGuid[key] = updated;
 
-            // 16W23: append updated snapshot to history (rolling).
-            if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist2) || hist2 is null)
-            {
-                hist2 = new List<ChildPolicy>();
-                _policyHistoryByChildGuid[key] = hist2;
-            }
-            hist2.RemoveAll(p => p.Version.Value == updated.Version.Value);
-            hist2.Add(updated);
-            hist2.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
-            if (hist2.Count > 20)
-                _policyHistoryByChildGuid[key] = hist2.Skip(hist2.Count - 20).ToList();
-
             EnsureChildProfileUnsafe_NoLock(childId);
             PersistUnsafe_NoLock();
             return updated;
         }
     }
-
-public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy, out ChildPolicy rolledBack, out string error)
-{
-    lock (_gate)
-    {
-        rolledBack = default!;
-        error = string.Empty;
-        var key = childId.Value.ToString();
-        if (!_policiesByChildGuid.TryGetValue(key, out var current))
-        {
-            error = "policy_not_found";
-            return false;
-        }
-        if (!_statusByChildGuid.TryGetValue(key, out var status) || status.LastKnownGoodPolicyVersion is null)
-        {
-            error = "no_last_known_good";
-            return false;
-        }
-
-        var targetVer = status.LastKnownGoodPolicyVersion.Value;
-        ChildPolicy? snapshot = null;
-
-        if (_policyHistoryByChildGuid.TryGetValue(key, out var hist) && hist is not null)
-        {
-            snapshot = hist.LastOrDefault(p => p.Version.Value == targetVer);
-        }
-        if (snapshot is null && current.Version.Value == targetVer)
-            snapshot = current;
-
-        if (snapshot is null)
-        {
-            error = "history_missing";
-            return false;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        rolledBack = snapshot with
-        {
-            Version = current.Version.Next(),
-            UpdatedAtUtc = now,
-            UpdatedBy = string.IsNullOrWhiteSpace(updatedBy) ? "rollback" : updatedBy
-        };
-
-        _policiesByChildGuid[key] = rolledBack;
-
-        // Append to history (rolling).
-        if (!_policyHistoryByChildGuid.TryGetValue(key, out var hist2) || hist2 is null)
-        {
-            hist2 = new List<ChildPolicy>();
-            _policyHistoryByChildGuid[key] = hist2;
-        }
-	    // Avoid capturing out parameter in a lambda (CS1628).
-	    var rolledBackVersion = rolledBack.Version.Value;
-	    hist2.RemoveAll(p => p.Version.Value == rolledBackVersion);
-        hist2.Add(rolledBack);
-        hist2.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
-        if (hist2.Count > 20)
-            _policyHistoryByChildGuid[key] = hist2.Skip(hist2.Count - 20).ToList();
-
-        PersistUnsafe_NoLock();
-        return true;
-    }
-}
 
     private void LoadOrSeed()
     {
@@ -1958,34 +1655,6 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
 
                 _policiesByChildGuid = state.Policies
                     .ToDictionary(p => p.ChildId.Value.ToString(), p => p, StringComparer.OrdinalIgnoreCase);
-
-                // 16W23: load policy history (optional).
-                _policyHistoryByChildGuid = new Dictionary<string, List<ChildPolicy>>(StringComparer.OrdinalIgnoreCase);
-                if (state.PolicyHistory is not null)
-                {
-                    foreach (var ph in state.PolicyHistory)
-                    {
-                        var kk = ph.ChildId.Value.ToString();
-                        _policyHistoryByChildGuid[kk] = ph.Policies ?? new List<ChildPolicy>();
-                    }
-                }
-                // Ensure every child has at least its current policy in history.
-                foreach (var kvp in _policiesByChildGuid)
-                {
-                    if (!_policyHistoryByChildGuid.TryGetValue(kvp.Key, out var list) || list is null)
-                    {
-                        list = new List<ChildPolicy>();
-                        _policyHistoryByChildGuid[kvp.Key] = list;
-                    }
-                    if (!list.Any(p => p.Version.Value == kvp.Value.Version.Value))
-                    {
-                        list.Add(kvp.Value);
-                    }
-                    // cap to the newest 20 versions
-                    list.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
-                    if (list.Count > 20)
-                        _policyHistoryByChildGuid[kvp.Key] = list.Skip(list.Count - 20).ToList();
-                }
 
                 _statusByChildGuid = (state.Statuses ?? new List<ChildAgentStatus>())
                     .ToDictionary(s => s.ChildId.Value.ToString(), s => s, StringComparer.OrdinalIgnoreCase);
@@ -2080,10 +1749,6 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
             .Select(kvp => new ChildCommandsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value))
             .ToList();
 
-        var policyHistory = _policyHistoryByChildGuid
-            .Select(kvp => new PolicyHistoryState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value))
-            .ToList();
-
         var state = new ControlPlaneState(
             Children: _children,
             Policies: _policiesByChildGuid.Values.ToList(),
@@ -2099,7 +1764,6 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
             LocalSettingsProfiles: _localSettingsProfileJsonByChildGuid.Select(kvp => new LocalSettingsProfileState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalActivityEvents: _localActivityEventsJsonByChildGuid.Select(kvp => new LocalActivityEventsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalLocations: _localLastLocationJsonByChildGuid.Select(kvp => new LocalLocationState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
-            PolicyHistory: policyHistory,
             SchemaVersion: CurrentSchemaVersion
         );
 
@@ -2141,37 +1805,21 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         var bytes = RandomNumberGenerator.GetBytes(8);
         ulong val = BitConverter.ToUInt64(bytes, 0);
         var mod = (ulong)Math.Pow(10, digits);
-		return (val % mod).ToString().PadLeft(digits, '0');
-	}
+        return (val % mod).ToString().PadLeft(digits, '0');
+    }
 
-
-    private static TimeSpan GetPolicyWatchdogThreshold()
+    private static string GenerateDeviceToken()
     {
-        // 16W21: policy sync watchdog. If configured policy version is newer than applied
-        // and the mismatch persists beyond this threshold, surface an overdue state.
-        // Defaults to 10 minutes.
-        // Overrides for tests / diagnostics (first match wins):
-        //  - SAFE0NE_POLICY_WATCHDOG_SECONDS
-        //  - SAFE0NE_POLICY_WATCHDOG_MINUTES
-        try
-        {
-            var rawSeconds = Environment.GetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS");
-            if (!string.IsNullOrWhiteSpace(rawSeconds) && int.TryParse(rawSeconds, out var s) && s > 0)
-            {
-                return TimeSpan.FromSeconds(s);
-            }
+        // 32 bytes => 256-bit token.
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        return Convert.ToBase64String(bytes);
+    }
 
-            var rawMinutes = Environment.GetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_MINUTES");
-            if (!string.IsNullOrWhiteSpace(rawMinutes) && int.TryParse(rawMinutes, out var mins) && mins > 0)
-            {
-                return TimeSpan.FromMinutes(mins);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-		return TimeSpan.FromMinutes(10);
+    private static string ComputeSha256Hex(string input)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash);
     }
 
     private sealed record PairedDevice(
@@ -2179,11 +1827,7 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         string DeviceName,
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
-        string TokenHashSha256,
-        DateTimeOffset TokenIssuedAtUtc = default,
-        DateTimeOffset TokenExpiresAtUtc = default,
-        DateTimeOffset? TokenRevokedAtUtc = null,
-        string? TokenRevokedBy = null);
+        string TokenHashSha256);
 
     private sealed record PendingPairing(
         ChildId ChildId,
@@ -2216,11 +1860,6 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         ChildId ChildId,
         List<ChildCommand> Commands);
 
-    // 16W23: rolling policy snapshots for rollback.
-    private sealed record PolicyHistoryState(
-        ChildId ChildId,
-        List<ChildPolicy> Policies);
-
     private sealed record ControlPlaneState(
         List<ChildProfile> Children,
         List<ChildPolicy> Policies,
@@ -2239,7 +1878,6 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         List<LocalSettingsProfileState>? LocalSettingsProfiles = null,
         List<LocalActivityEventsState>? LocalActivityEvents = null,
         List<LocalLocationState>? LocalLocations = null,
-        List<PolicyHistoryState>? PolicyHistory = null,
         int SchemaVersion = CurrentSchemaVersion);
 
     private sealed record LocalLocationState(
