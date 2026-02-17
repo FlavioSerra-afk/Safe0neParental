@@ -36,4 +36,10 @@ public sealed class ChildStateStore
 public sealed record ScreenTimeSnapshot(
     TimeSpan UsedToday,
     TimeSpan RemainingToday,
-    bool LimitEnabled);
+    bool LimitEnabled)
+{
+    // Back-compat aliases for older UI code paths.
+    public bool HasBudget => LimitEnabled;
+    public TimeSpan Used => UsedToday;
+    public TimeSpan Remaining => RemainingToday;
+}

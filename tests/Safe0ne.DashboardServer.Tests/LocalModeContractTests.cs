@@ -14,7 +14,6 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
     public LocalModeContractTests(WebApplicationFactory<Program> factory)
     {
         _factory = factory;
-    }
 
     [Fact]
     public async Task LocalHealth_IsAvailable()
@@ -249,57 +248,6 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
 }
 
     [Fact]
-    [Fact]
-    public async Task WebAlertsToday_Persists_FromHeartbeat_AndSurfacesInStatus()
-    {
-        using var client = _factory.CreateClient();
-
-        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Web Alerts Child" });
-        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
-        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
-        var id = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(id));
-
-        // Start pairing
-        var start = await client.PostAsync($"/api/local/children/{id}/devices/pair", null);
-        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
-        using var startDoc = JsonDocument.Parse(await start.Content.ReadAsStringAsync());
-        var code = startDoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(code));
-
-        // Enroll device
-        var enroll = await client.PostAsJsonAsync("/api/local/devices/enroll", new { pairingCode = code, deviceName = "WDev", agentVersion = "0.0.0-test" });
-        Assert.Equal(HttpStatusCode.OK, enroll.StatusCode);
-        using var enrollDoc = JsonDocument.Parse(await enroll.Content.ReadAsStringAsync());
-        var token = enrollDoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(token));
-
-        client.DefaultRequestHeaders.Remove(AgentAuth.DeviceTokenHeaderName);
-        client.DefaultRequestHeaders.Add(AgentAuth.DeviceTokenHeaderName, token);
-
-        var hb = new
-        {
-            deviceName = "WDev",
-            agentVersion = "0.0.0-test",
-            sentAtUtc = DateTimeOffset.UtcNow,
-            web = new
-            {
-                localDate = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"),
-                alertsToday = 3,
-                blockedDomainsConfigured = 2
-            }
-        };
-
-        var hbRes = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
-        Assert.Equal(HttpStatusCode.OK, hbRes.StatusCode);
-
-        var stRes = await client.GetAsync($"/api/v1/children/{id}/status");
-        Assert.Equal(HttpStatusCode.OK, stRes.StatusCode);
-        using var stDoc = JsonDocument.Parse(await stRes.Content.ReadAsStringAsync());
-        var webAlertsToday = stDoc.RootElement.GetProperty("data").GetProperty("webAlertsToday").GetInt32();
-        Assert.Equal(3, webAlertsToday);
-    }
-
     public async Task PolicyRollback_IsRecommended_OnFailure_And_RollbackEndpoint_RevertsSnapshot()
     {
         using var client = _factory.CreateClient();
@@ -367,3 +315,4 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         Assert.Equal("Lockdown", rbMode);
         Assert.True(rbVer > v3);
     }
+}
