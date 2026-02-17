@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   const LS_CHILDREN = "safe0ne.children.v1";
   const LS_PROFILES = "safe0ne.childProfiles.v1";
   const LS_SHOW_ARCHIVED = "safe0ne.children.showArchived.v1";
@@ -553,8 +553,7 @@ function renderDevicesTab(child) {
     })
     .join("");
 
-    const pairUrl = "http://127.0.0.1:8771/pair";
-const pairingBlock = (useApi
+  const pairingBlock = (useApi
     ? (pairing && pairing.pairingCode
         ? `<div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
             <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -562,22 +561,19 @@ const pairingBlock = (useApi
               <div class="so-card-sub">Expires: ${escapeHtml(pairing.expiresAtUtc ? new Date(pairing.expiresAtUtc).toLocaleString() : "—")}</div>
             </div>
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="so-btn" data-action="copyPairCode" data-code="${escapeHtml(pairing.pairingCode)}" type="button">Copy code</button>
-              <button class="so-btn" data-action="copyPairUrl" data-url="${escapeHtml(pairUrl)}" type="button">Copy Kid URL</button>
-              <button class="so-btn so-btn-danger" data-action="clearPairing" data-childid="${escapeHtml(id)}" type="button">Clear</button>
+              <button class="so-btn" data-action="copyPairCode" data-code="${escapeHtml(pairing.pairingCode)}" type="button">Copy</button>
               <button class="so-btn" data-action="refreshDevices" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
             </div>
           </div>`
         : `<div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
             <div style="font-weight:900;">No active pairing session</div>
             <div class="so-card-sub" style="margin-top:6px;">Generate a pairing code and enter it on the Kid device to enroll.</div>
-            <div class="so-card-sub" style="margin-top:6px;">On the Kid device, open: <span class="so-pill">${escapeHtml(pairUrl)}</span></div>
           </div>`)
     : "");
 
   const pairActions = useApi
     ? `<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-        <button class="so-btn" data-action="pairDevice" data-childid="${escapeHtml(id)}" type="button">Generate / refresh pairing code</button>
+        <button class="so-btn" data-action="pairDevice" data-childid="${escapeHtml(id)}" type="button">Generate pairing code</button>
         <button class="so-btn" data-action="refreshDevices" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
       </div>`
     : `<div style="margin-top:12px;" class="so-card-sub">Pair devices to this child profile (local mode requires SSOT-backed child).</div>`;
@@ -2199,26 +2195,6 @@ if (action === "copyPairCode") {
   window.Safe0neUi?.toast?.("Copied", "Pairing code copied.");
   return;
 }
-
-if (action === "copyPairUrl") {
-  ev.preventDefault();
-  const url = btn.getAttribute("data-url") || "";
-  if (!url) return;
-  try { navigator.clipboard?.writeText?.(url); } catch {}
-  window.Safe0neUi?.toast?.("Copied", "Kid URL copied.");
-  return;
-}
-
-if (action === "clearPairing") {
-  ev.preventDefault();
-  const childId = btn.getAttribute("data-childid") || "";
-  if (!childId || !api?.clearChildPairingLocal) return;
-  await api.clearChildPairingLocal(childId);
-  await refreshDevicesForChild(childId);
-  window.Safe0neUi?.toast?.("Cleared", "Pairing session cleared.");
-  return;
-}
-
 
 if (action === "refreshDevices") {
   ev.preventDefault();
