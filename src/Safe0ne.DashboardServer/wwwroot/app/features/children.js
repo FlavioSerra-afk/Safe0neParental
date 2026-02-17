@@ -548,18 +548,26 @@ function renderDevicesTab(child) {
         : (tokenExpires ? `Token expires: ${tokenExpires}` : "");
       const canUnpair = useApi && devId;
       const canRevoke = useApi && devId && !revoked;
+      const canRepair = useApi && (revoked || expired);
       return `
     <div class="tr">
       <div><strong>${escapeHtml(name)}</strong></div>
       <div><span class="so-pill">${escapeHtml(status)}</span></div>
       <div class="so-card-sub">${escapeHtml(lastSeen)}${tokenMeta ? `<div class="so-card-sub" style="margin-top:6px;">${escapeHtml(tokenMeta)}</div>` : ""}</div>
       <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+        ${canRepair ? `<button class="so-btn" data-action="pairDevice" data-childid="${escapeHtml(id)}" type="button">Re-pair</button>` : ""}
         ${canRevoke ? `<button class="so-btn" data-action="revokeDeviceToken" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Revoke token</button>` : ""}
         ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
       </div>
     </div>`;
     })
     .join("");
+
+  // Pairing deep link is optional polish. It does not replace code-based pairing.
+  const pairingCode = (pairing && pairing.pairingCode) ? String(pairing.pairingCode) : "";
+  const pairingDeepLink = (pairingCode && isGuid(id))
+    ? `safe0ne://pair?childId=${encodeURIComponent(id)}&code=${encodeURIComponent(pairingCode)}`
+    : "";
 
   const pairingBlock = (useApi
     ? (pairing && pairing.pairingCode
@@ -568,6 +576,19 @@ function renderDevicesTab(child) {
               <div style="font-weight:900;">Pairing code: <span class="so-pill">${escapeHtml(pairing.pairingCode)}</span></div>
               <div class="so-card-sub">Expires: ${escapeHtml(pairing.expiresAtUtc ? new Date(pairing.expiresAtUtc).toLocaleString() : "—")}</div>
             </div>
+            ${pairingDeepLink ? `
+              <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+                <div class="so-card-sub" style="flex:1;min-width:240px;">
+                  Pairing link (optional):
+                  <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                    <input class="so-input" style="flex:1;min-width:260px;" readonly value="${escapeHtml(pairingDeepLink)}" />
+                    <button class="so-btn" data-action="copyPairLink" data-link="${escapeHtml(pairingDeepLink)}" type="button">Copy link</button>
+                    <a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(pairingDeepLink)}">Open</a>
+                  </div>
+                  <div class="so-card-sub" style="margin-top:6px;">If the Kid device supports Safe0ne links, it can open the pairing screen pre-filled.</div>
+                </div>
+              </div>
+            ` : ""}
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="so-btn" data-action="copyPairCode" data-code="${escapeHtml(pairing.pairingCode)}" type="button">Copy</button>
               <button class="so-btn" data-action="refreshDevices" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
@@ -2201,6 +2222,15 @@ if (action === "copyPairCode") {
   if (!code) return;
   try { navigator.clipboard?.writeText?.(code); } catch {}
   window.Safe0neUi?.toast?.("Copied", "Pairing code copied.");
+  return;
+}
+
+if (action === "copyPairLink") {
+  ev.preventDefault();
+  const link = btn.getAttribute("data-link") || "";
+  if (!link) return;
+  try { navigator.clipboard?.writeText?.(link); } catch {}
+  window.Safe0neUi?.toast?.("Copied", "Pairing link copied.");
   return;
 }
 

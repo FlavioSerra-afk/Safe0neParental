@@ -72,7 +72,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-POL-004 | Policies | Policy apply status: last applied version + timestamp per device (observable) | Win✅ | 🟡 | PATCH_16W19 |
 | P-LOC-001 | Location | Geofence overlay UX in child profile | Win✅ | ✅ | PATCH_16U13 → 16U13d |
 | P-LOC-002 | Location | Geofence transitions emitted as Alerts/Activity | Win✅ | ✅ | PATCH_16U15 |
-| P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | Local pairing + device list implemented; 16W20 adds token revoke + expiry surfaces. QR/deeplink polish remains planned. |
+| P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | Local pairing + device list implemented; 16W20 adds token revoke + expiry surfaces; 16W22 adds pairing deeplink copy + per-device re-pair action. QR image generation remains planned. |
 | P-HEALTH-001 | Devices | Device health (heartbeat/last seen) | Win✅ | 🟡 | Planned; see backlog. |
 | P-ANTITAMPER-001 | Security | Anti-tamper resilience (stubs) | Win✅ | 🟡 | 16W15–16W17: tamper/circumvention surfaced + alerts + policy gates; enforcement/self-repair still TBD. |
 | P-AUDIT-001 | Compliance | Append-only audit log for policy changes | Win✅ | 🔴 | Planned next: **PATCH_16W8** (proposal only). |
