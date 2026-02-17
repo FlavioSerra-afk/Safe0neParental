@@ -1,3 +1,5 @@
-// Intentionally blank.
-// Older patch revisions introduced a partial split for ChildHeartbeatRequest overloads.
-// We now keep a single consolidated primary declaration in LegacyAliases.cs to avoid ctor/name drift.
+// Intentionally left blank.
+//
+// Older iterations used this file to add constructor overloads via partial record declarations.
+// That approach proved brittle and caused duplicate constructor/type errors.
+// Keep this file as a no-op placeholder so patch application can safely overwrite older content.
