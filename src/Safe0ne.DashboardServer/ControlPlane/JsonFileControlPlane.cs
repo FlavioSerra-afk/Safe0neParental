@@ -909,13 +909,19 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 return Array.Empty<ChildDeviceSummary>();
             }
 
+            DateTimeOffset? lastSeen = null;
+            if (_statusByChildGuid.TryGetValue(key, out var s))
+            {
+                lastSeen = s.LastSeenUtc;
+            }
+
             return devices
                 .Select(d => new ChildDeviceSummary(
                     DeviceId: d.DeviceId,
                     DeviceName: d.DeviceName,
                     AgentVersion: d.AgentVersion,
                     PairedAtUtc: d.PairedAtUtc,
-                    LastSeenUtc: d.LastSeenUtc))
+                    LastSeenUtc: lastSeen))
                 .ToList();
         }
     }
@@ -952,7 +958,113 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
         }
     }
 
-    public PairingStartResponse StartPairing(ChildId childId)
+    
+// --- 16W12: Device health sweep + auth-failure recording (local-first, SSOT-backed where possible) ---
+// These APIs are called by background services and auth middleware. We keep the surface stable and
+// tolerant of different call signatures by using params object[].
+
+private readonly Dictionary<string, DeviceHealthShadow> _deviceHealthShadowByChildGuid = new(StringComparer.Ordinal);
+
+private sealed record DeviceHealthShadow(
+    bool IsOnline,
+    DateTimeOffset UpdatedAtUtc,
+    int RecentAuthFailures,
+    DateTimeOffset? LastAuthFailureUtc);
+
+public void RecordDeviceAuthFailure(ChildId childId, params object[] args)
+{
+    lock (_gate)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var key = childId.Value.ToString();
+
+        if (!_deviceHealthShadowByChildGuid.TryGetValue(key, out var shadow))
+        {
+            shadow = new DeviceHealthShadow(IsOnline: false, UpdatedAtUtc: now, RecentAuthFailures: 0, LastAuthFailureUtc: null);
+        }
+
+        shadow = shadow with
+        {
+            UpdatedAtUtc = now,
+            RecentAuthFailures = Math.Min(9999, shadow.RecentAuthFailures + 1),
+            LastAuthFailureUtc = now
+        };
+
+        _deviceHealthShadowByChildGuid[key] = shadow;
+
+        // Best-effort: surface into the existing activity stream.
+        try
+        {
+            var detail = args is { Length: > 0 }
+                ? string.Join(", ", args.Select(a => a is null ? "null" : a.ToString()))
+                : "unauthorized";
+            var evt = JsonSerializer.Serialize(new[] { new { kind = "device_auth_failed", childId = childId.Value, detail, atUtc = now } });
+            AppendLocalActivityJsonUnsafe_NoLock(key, evt);
+        }
+        catch { /* best-effort */ }
+    }
+}
+
+public void SweepDeviceHealth(params object[] args)
+{
+    // Supported call shapes:
+    //  - SweepDeviceHealth()
+    //  - SweepDeviceHealth(DateTimeOffset nowUtc)
+    //  - SweepDeviceHealth(DateTimeOffset nowUtc, TimeSpan offlineThreshold)
+    DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+    TimeSpan offlineThreshold = TimeSpan.FromMinutes(3);
+
+    if (args is { Length: >= 1 } && args[0] is DateTimeOffset dto)
+    {
+        nowUtc = dto;
+    }
+    if (args is { Length: >= 2 } && args[1] is TimeSpan ts)
+    {
+        offlineThreshold = ts;
+    }
+
+    lock (_gate)
+    {
+        // Only evaluate children that have at least one paired device.
+        foreach (var kvp in _devicesByChildGuid)
+        {
+            var key = kvp.Key;
+            var childId = new ChildId(Guid.Parse(key));
+
+            var hasDevice = kvp.Value is { Count: > 0 };
+            if (!hasDevice) continue;
+
+            var isOnline = false;
+            if (_statusByChildGuid.TryGetValue(key, out var status))
+            {
+                isOnline = status.LastSeenUtc >= nowUtc - offlineThreshold;
+            }
+
+            if (!_deviceHealthShadowByChildGuid.TryGetValue(key, out var shadow))
+            {
+                shadow = new DeviceHealthShadow(IsOnline: isOnline, UpdatedAtUtc: nowUtc, RecentAuthFailures: 0, LastAuthFailureUtc: null);
+                _deviceHealthShadowByChildGuid[key] = shadow;
+                continue;
+            }
+
+            if (shadow.IsOnline != isOnline)
+            {
+                _deviceHealthShadowByChildGuid[key] = shadow with { IsOnline = isOnline, UpdatedAtUtc = nowUtc };
+
+                // Emit transition event into activity stream (best-effort).
+                try
+                {
+                    var kind = isOnline ? "device_online" : "device_offline";
+                    var evt = JsonSerializer.Serialize(new[] { new { kind, childId = childId.Value, atUtc = nowUtc } });
+                    AppendLocalActivityJsonUnsafe_NoLock(key, evt);
+                }
+                catch { /* best-effort */ }
+            }
+        }
+    }
+}
+
+public PairingStartResponse StartPairing(ChildId childId)
     {
         lock (_gate)
         {
@@ -1139,31 +1251,11 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var circumvention = req.Circumvention;
             var tamper = req.Tamper;
 
-            var nowUtc = DateTimeOffset.UtcNow;
-
-            // Device health: if this heartbeat is authenticated to a specific enrolled device, update per-device last-seen.
-            if (authenticated && deviceId is not null)
-            {
-                if (_devicesByChildGuid.TryGetValue(key, out var devs))
-                {
-                    var idx = devs.FindIndex(d => d.DeviceId == deviceId.Value);
-                    if (idx >= 0)
-                    {
-                        var cur = devs[idx];
-                        devs[idx] = cur with
-                        {
-                            AgentVersion = req.AgentVersion ?? cur.AgentVersion,
-                            LastSeenUtc = nowUtc
-                        };
-                    }
-                }
-            }
-
             var status = new ChildAgentStatus(
                 ChildId: childId,
-                LastSeenUtc: nowUtc,
+                LastSeenUtc: DateTimeOffset.UtcNow,
                 DeviceName: req.DeviceName,
-                AgentVersion: req.AgentVersion ?? (deviceId is not null ? devs.FirstOrDefault(d => d.DeviceId == deviceId)?.AgentVersion : null) ?? "unknown",
+                AgentVersion: req.AgentVersion,
                 EffectiveMode: effective.EffectiveMode,
                 ReasonCode: effective.ReasonCode,
                 PolicyVersion: effective.PolicyVersion,
@@ -1902,8 +1994,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         string DeviceName,
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
-        string TokenHashSha256,
-        DateTimeOffset? LastSeenUtc = null);
+        string TokenHashSha256);
 
     private sealed record PendingPairing(
         ChildId ChildId,
