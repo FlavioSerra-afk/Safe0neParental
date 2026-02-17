@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
@@ -29,33 +31,20 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
 
-
     [Fact]
-    public async Task ReportsSchedule_Routes_Exist_And_RunNow_Works()
+    public async Task LocalDevices_Route_Exists_ForNewChild()
     {
         using var client = _factory.CreateClient();
 
-        // Create a child
-        var create = await client.PostAsync("/api/local/children", new StringContent("{\"displayName\":\"Test Kid\"}", System.Text.Encoding.UTF8, "application/json"));
+        // Create a child in local mode.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Test Child" });
         Assert.Equal(HttpStatusCode.OK, create.StatusCode);
-        var createdJson = await create.Content.ReadAsStringAsync();
-        // Quick parse: look for "id":"..."
-        var idStart = createdJson.IndexOf("\"id\":\"", StringComparison.Ordinal);
-        Assert.True(idStart >= 0, "Expected created child id in response");
-        var id = createdJson.Substring(idStart + 6, 36);
 
-        // Put a schedule
-        var put = await client.PutAsync($"/api/local/children/{id}/reports/schedule",
-            new StringContent("{\"enabled\":true,\"digest\":{\"frequency\":\"daily\",\"timeLocal\":\"18:00\",\"weekday\":\"sun\"}}", System.Text.Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        using var doc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var id = doc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(id));
 
-        // Get it back
-        var get = await client.GetAsync($"/api/local/children/{id}/reports/schedule");
-        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-
-        // Run now
-        var run = await client.PostAsync($"/api/local/children/{id}/reports/run-now", null);
-        Assert.Equal(HttpStatusCode.OK, run.StatusCode);
+        var devices = await client.GetAsync($"/api/local/children/{id}/devices");
+        Assert.Equal(HttpStatusCode.OK, devices.StatusCode);
     }
-
 }

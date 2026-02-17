@@ -538,14 +538,17 @@ function renderDevicesTab(child) {
     .map((d) => {
       const devId = String(d?.deviceId ?? d?.id ?? "");
       const name = String(d?.deviceName ?? d?.name ?? "Device");
-      const status = String(d?.status ?? (devId ? "Enrolled" : "Not paired"));
-      const lastSeen = d?.lastSeenUtc ? new Date(d.lastSeenUtc).toLocaleString() : (d?.lastSeen || "—");
+      const lastSeenDt = d?.lastSeenUtc ? new Date(d.lastSeenUtc) : null;
+      const lastSeen = lastSeenDt ? lastSeenDt.toLocaleString() : (d?.lastSeen || "—");
+      const online = !!(lastSeenDt && (Date.now() - lastSeenDt.getTime()) < (3 * 60 * 1000));
+      const status = String(d?.status ?? (devId ? (online ? "Online" : "Offline") : "Not paired"));
+      const ver = String(d?.agentVersion || "");
       const canUnpair = useApi && devId;
       return `
     <div class="tr">
       <div><strong>${escapeHtml(name)}</strong></div>
       <div><span class="so-pill">${escapeHtml(status)}</span></div>
-      <div class="so-card-sub">${escapeHtml(lastSeen)}</div>
+      <div class="so-card-sub">${escapeHtml(lastSeen)}${ver ? ` • v${escapeHtml(ver)}` : ""}</div>
       <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
         ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
       </div>

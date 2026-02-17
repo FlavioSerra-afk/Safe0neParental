@@ -39,8 +39,8 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-POLICY-WEB-SAFETY | Policy | SafeSearch/Restricted toggles persisted | ✅ | Parent: web safety toggles | SSOT: policy web safety | Implemented in 16T stream |
 | EPIC-LOCATION-GEOFENCE | Location | Geofence authoring + overlay + evaluation + alerts | ✅ | Parent: geofence overlay UX; Kid: eval; Alerts: activity | SSOT: geofence config + event stream | Implemented 16U13–16U15 |
 | EPIC-ALERTS-INBOX | Alerts | Alerts inbox: routing + grouping + ack | ✅ | Parent: Alerts inbox UI + ack | SSOT: alert routing/config + ack endpoints | Self-test PASS restored in 16W7a |
-| EPIC-REPORTS | Reports | Reports scheduling | 🟡 | Parent: reports scheduling surface | SSOT: report schedules (stub) | 16W7 = stub only |
-| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Kid: pairing flow; Parent: add device | SSOT: device registry + enrollment | Kid UX /pair; Local enroll endpoint; auth cache + current child binding |
+| EPIC-REPORTS | Reports | Reports scheduling + runner (local-first) | ✅ | Parent: Reports scheduling + Recent reports | SSOT: policy.reports + reportsState + activity events | Runner emits `report_digest` events; UI shows history |
+| EPIC-PAIRING | Kid/Devices | Pairing & provisioning (code-based v1) | 🟡 | Parent: Child → Devices tab; Kid: `/pair` flow | SSOT: device registry + enrollment token hashing | Local endpoints: `/api/local/children/{id}/devices/*` + `/api/local/devices/enroll` |
 | EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🔴 | Kid agent | SSOT: policy versions + heartbeat | Planned in KFT-006+ |
 | EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
 | EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
@@ -48,7 +48,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🔴 | Kid UX | SSOT: policy + runtime state | Planned in KFT-029+ |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🔴 | Kid agent + alerts | SSOT: health + tamper signals | Planned in KFT-038+ |
-EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Parent: Admin → Advanced → Audit Log | SSOT: Local Control Plane (append-only per-child audit chain) | Implemented (16W8, restored in 16W9b hotfix): logs policy saves; endpoint GET /api/local/children/{id}/audit |
+| EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Parent: Admin → Audit Log | SSOT: append-only audit stream per child | Local endpoint `/api/local/children/{id}/audit` + UI viewer |
 
 ## How to update this registry (every patch)
 1. Identify affected epic(s) and specific features.

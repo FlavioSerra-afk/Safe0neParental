@@ -1,27 +1,20 @@
-# Device Pairing (Kid enrollment)
+# Device Pairing
 
-This feature links a **Kid device** to a **Child profile** so policies, requests, and heartbeats can be authenticated.
+Pairing connects a Kid device (agent + Kid UX) to a specific child profile.
 
-## Where to generate a pairing code (Parent)
-1. Open **Children**.
-2. Select a child profile.
-3. Go to **Devices** tab.
-4. Click **Generate pairing code**.
-5. Keep the code handy (it expires).
+Pairing in this repo is currently **code-based** (local-first).
 
-## Where to enter the pairing code (Kid)
-On the Kid device, open the Safe0ne Child UX and go to:
+## Generate a pairing code (Parent)
+1. Open **Children → select a child → Devices tab**.
+2. Click **Generate pairing code**.
+3. Copy the code.
 
-- **Today → Enter pairing code**, or directly: `http://127.0.0.1:8771/pair`
+## Enter the pairing code (Kid)
+1. On the Kid device, open **Kid UX**.
+2. Go to **/pair**.
+3. Enter the pairing code and submit.
 
-Enter the code and press **Pair**.
+If successful, the Kid agent receives a **device token** and persists it so future heartbeats authenticate.
 
-## What happens after pairing
-- The agent receives a **device token** and caches it locally.
-- The agent also stores the **current child id binding** so it knows which child profile to authenticate as on restart.
-- Heartbeats and agent endpoints will include the token automatically.
-
-## Troubleshooting
-- If pairing fails, verify the code is still active in the Parent app (Devices tab).
-- Ensure the DashboardServer is running locally and reachable from the Kid device environment.
-- If the device was previously paired to a different child, re-pairing will update the current child binding.
+## Unpair
+In **Devices tab**, click **Unpair** for the device.
