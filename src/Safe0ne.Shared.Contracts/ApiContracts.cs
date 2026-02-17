@@ -132,7 +132,15 @@ public sealed record ChildAgentHeartbeatRequest(
     // K6: web filtering aggregates + circumvention signals
     WebReport? Web = null,
     CircumventionSignals? Circumvention = null,
-    TamperSignals? Tamper = null);
+    TamperSignals? Tamper = null,
+    // 16W19: policy sync observability (agent -> SSOT ack)
+    long? LastAppliedPolicyVersion = null,
+    DateTimeOffset? LastAppliedPolicyEffectiveAtUtc = null,
+    string? LastAppliedPolicyFingerprint = null,
+    // 16W19: best-effort apply failure signal (activity-backed; persisted as status fields too)
+    DateTimeOffset? LastPolicyApplyFailedAtUtc = null,
+    string? LastPolicyApplyError = null
+);
 
 /// <summary>
 /// Diagnostics bundle metadata for support exports.
@@ -174,7 +182,14 @@ public sealed record ChildAgentStatus(
     WebBlockedDomainItem[]? WebTopBlockedDomains = null,
     int WebAlertsToday = 0,
     CircumventionSignals? Circumvention = null,
-    TamperSignals? Tamper = null);
+    TamperSignals? Tamper = null,
+    // 16W19: policy sync observability (what the agent actually applied)
+    long? LastAppliedPolicyVersion = null,
+    DateTimeOffset? LastAppliedPolicyEffectiveAtUtc = null,
+    string? LastAppliedPolicyFingerprint = null,
+    DateTimeOffset? LastPolicyApplyFailedAtUtc = null,
+    string? LastPolicyApplyError = null
+);
 
 /// <summary>
 /// Response returned when a parent generates a pairing code for a child device.

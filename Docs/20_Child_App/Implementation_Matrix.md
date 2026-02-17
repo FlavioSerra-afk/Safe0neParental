@@ -26,6 +26,7 @@ Legend:
 |---|---|---|---|---|---|
 | K-FOUND-001 | Foundation | Consume shared contracts (DTOs/enums) | Win✅ | ✅ | Shared contracts baseline. |
 | K-SSOT-001 | SSOT | Read policy + grants from Local Control Plane | Win✅ | ✅ | Required for request loop. |
+| K-POLSYNC-001 | Agent | Policy sync replay protection + apply ack (version/fingerprint) | Win✅ | 🟡 | PATCH_16W19 (extends 16W14) |
 | K-REQ-001 | Agent | Apply approved grants (time-boxed exceptions) | Win✅ | ✅ | “Request loop” baseline. |
 | K-REQ-002 | Kid UX | Create/request exceptions (child → parent) | Win✅ | ✅ | Must remain working. |
 | K-LOC-001 | Agent | Geofence evaluation (inside/outside) | Win✅ | ✅ | PATCH_16U14 |

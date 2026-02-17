@@ -63,6 +63,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-POL-001 | Policies | Screen time grace + warnings config | Win✅ | ✅ | PATCH_16R |
 | P-POL-002 | Policies | Per-app limits authoring UI validation | Win✅ | ✅ | PATCH_16S |
 | P-POL-003 | Policies | SafeSearch / Restricted toggles persisted | Win✅ | ✅ | PATCH_16T |
+| P-POL-004 | Policies | Policy apply status: last applied version + timestamp per device (observable) | Win✅ | 🟡 | PATCH_16W19 |
 | P-LOC-001 | Location | Geofence overlay UX in child profile | Win✅ | ✅ | PATCH_16U13 → 16U13d |
 | P-LOC-002 | Location | Geofence transitions emitted as Alerts/Activity | Win✅ | ✅ | PATCH_16U15 |
 | P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | Planned; visible in matrices but not fully implemented. |

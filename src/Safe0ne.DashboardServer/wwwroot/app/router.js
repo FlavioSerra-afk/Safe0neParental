@@ -1028,6 +1028,14 @@ webCategoryRules.forEach(r => {
         <div>Proxy enabled: <strong>${status && status.circumvention ? (status.circumvention.proxyEnabled ? "Yes" : "No") : "—"}</strong></div>
         <div>Public DNS detected: <strong>${status && status.circumvention ? (status.circumvention.publicDnsDetected ? "Yes" : "No") : "—"}</strong></div>
         <div>Hosts write failed: <strong>${status && status.circumvention ? (status.circumvention.hostsWriteFailed ? "Yes" : "No") : "—"}</strong></div>
+
+        <hr style="margin:10px 0;border:0;border-top:1px solid rgba(255,255,255,0.08);" />
+        <div style="font-weight:700;margin-bottom:6px;">Policy apply</div>
+        <div>Last applied version: <strong>${status && status.lastAppliedPolicyVersion ? escapeHtml(String(status.lastAppliedPolicyVersion)) : "—"}</strong></div>
+        <div>Applied at: <strong>${status && status.lastAppliedPolicyEffectiveAtUtc ? escapeHtml(String(status.lastAppliedPolicyEffectiveAtUtc)) : "—"}</strong></div>
+        <div>Apply status: <strong>${status && status.lastPolicyApplyFailedAtUtc ? ("Failed") : "OK"}</strong></div>
+        <div class="hint" style="margin-top:6px;">If the device is offline or enforcing from cache, the applied version may lag behind the configured policy version.</div>
+        ${status && status.lastPolicyApplyFailedAtUtc ? '<div class="notice notice--danger" style="margin-top:8px;">Last apply/enforcement error: <span class="mono">' + escapeHtml(String(status.lastPolicyApplyError || "unknown")) + '</span><br/><span class="muted">at ' + escapeHtml(String(status.lastPolicyApplyFailedAtUtc)) + '</span></div>' : ''}
       </div>
     </div>
   </div>

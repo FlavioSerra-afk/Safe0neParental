@@ -37,3 +37,20 @@ The Kid Agent reports **coarse, privacy-first** signals to help you understand w
 - **Troubleshooting**: see `User Manual → Troubleshooting` for common fixes.
 
 > Note: this is not yet “fail-closed”. Self-repair and stronger anti-tamper measures are tracked under EPIC-ANTITAMPER and remain planned.
+
+
+## Policy versions & apply status
+
+Safe0ne tracks two related policy values:
+
+- **Configured policy version**: the version stored in the Local Control Plane (SSOT). It increments whenever you save policy changes.
+- **Last applied policy version**: the last policy version the Kid agent reports it actually applied.
+
+### Why they can differ
+- The device is **offline** and has not received the latest policy yet.
+- The Kid agent is enforcing from its **last-known-good cache** (offline-first fallback).
+
+### Apply failures
+If the Kid agent observes a best-effort **apply/enforcement error**, Safe0ne records a `policy_apply_failed` activity event and surfaces the last error under Device Health.
+
+> This is an observability feature. Stronger self-repair/fail-closed behavior remains planned under EPIC-ANTITAMPER.

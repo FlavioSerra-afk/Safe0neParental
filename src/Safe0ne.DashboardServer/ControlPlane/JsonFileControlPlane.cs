@@ -416,6 +416,7 @@ public IReadOnlyList<LocalChildSnapshot> GetChildrenWithArchiveState(bool includ
     public void UpsertLocalChildMetaJson(ChildId childId, string metaJson)
     {
         var key = childId.Value.ToString();
+
         lock (_gate)
         {
             _localChildMetaJsonByChildGuid[key] = metaJson ?? "{}";
@@ -1101,6 +1102,18 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
         {
             var key = childId.Value.ToString();
 
+            // 16W19: persist policy apply acknowledgements from the agent (extra fields in heartbeat).
+            // If the agent omits these fields this tick, we preserve the last-known values.
+            var priorStatus = _statusByChildGuid.TryGetValue(key, out var prior0) ? prior0 : null;
+
+            var lastAppliedPolicyVersion = req.LastAppliedPolicyVersion ?? priorStatus?.LastAppliedPolicyVersion;
+            var lastAppliedPolicyEffectiveAtUtc = req.LastAppliedPolicyEffectiveAtUtc ?? priorStatus?.LastAppliedPolicyEffectiveAtUtc;
+            var lastAppliedPolicyFingerprint = !string.IsNullOrWhiteSpace(req.LastAppliedPolicyFingerprint) ? req.LastAppliedPolicyFingerprint : priorStatus?.LastAppliedPolicyFingerprint;
+
+            var lastPolicyApplyFailedAtUtc = req.LastPolicyApplyFailedAtUtc ?? priorStatus?.LastPolicyApplyFailedAtUtc;
+            var lastPolicyApplyError = !string.IsNullOrWhiteSpace(req.LastPolicyApplyError) ? req.LastPolicyApplyError : priorStatus?.LastPolicyApplyError;
+
+
             // K4: Store a privacy-first screen time summary for parent reporting.
             _policiesByChildGuid.TryGetValue(key, out var policy);
 
@@ -1207,7 +1220,12 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 WebTopBlockedDomains: webTopBlocked,
                 WebAlertsToday: webAlerts,
                 Circumvention: circumvention,
-                Tamper: tamper);
+                Tamper: tamper,
+                LastAppliedPolicyVersion: lastAppliedPolicyVersion,
+                LastAppliedPolicyEffectiveAtUtc: lastAppliedPolicyEffectiveAtUtc,
+                LastAppliedPolicyFingerprint: lastAppliedPolicyFingerprint,
+                LastPolicyApplyFailedAtUtc: lastPolicyApplyFailedAtUtc,
+                LastPolicyApplyError: lastPolicyApplyError);
 
             _statusByChildGuid[key] = status;
 
