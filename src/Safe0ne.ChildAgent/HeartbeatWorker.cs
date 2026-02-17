@@ -93,6 +93,10 @@ public sealed class HeartbeatWorker : BackgroundService
         string? lastAppliedPolicyFingerprint = null;
         int? lastAppliedPolicyVersion = null;
         DateTimeOffset? lastAppliedPolicyEffectiveAtUtc = null;
+        // 16W19: best-effort policy apply failure signals (used for parent-side observability).
+        // These are additive-only and safe when the server/parent doesn't yet consume them.
+        DateTimeOffset? lastPolicyApplyFailedAtUtc = null;
+        string? lastPolicyApplyError = null;
         bool usingCachedPolicy = false;
 
         while (!stoppingToken.IsCancellationRequested)
