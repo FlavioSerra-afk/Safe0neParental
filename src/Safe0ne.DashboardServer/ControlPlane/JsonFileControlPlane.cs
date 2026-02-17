@@ -2141,16 +2141,8 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         var bytes = RandomNumberGenerator.GetBytes(8);
         ulong val = BitConverter.ToUInt64(bytes, 0);
         var mod = (ulong)Math.Pow(10, digits);
-        return (val % mod).ToString().PadLeft(digits, '0');
-   
-    // (moved) Token/Crypto helpers live in JsonFileControlPlane.CryptoAndTokens.cs
-
-);
-   
-    // (moved) Token/Crypto helpers live in JsonFileControlPlane.CryptoAndTokens.cs
-
-  
-    }
+		return (val % mod).ToString().PadLeft(digits, '0');
+	}
 
 
     private static TimeSpan GetPolicyWatchdogThreshold()
@@ -2179,11 +2171,7 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
         {
             // ignore
         }
-        return TimeSpan.FromMinutes(10);
-   
-    // (moved) Token/Crypto helpers live in JsonFileControlPlane.CryptoAndTokens.cs
-
-);
+		return TimeSpan.FromMinutes(10);
     }
 
     private sealed record PairedDevice(
