@@ -1,4 +1,3 @@
-using System.Linq;
 
 using Safe0ne.Shared.Contracts;
 
@@ -42,11 +41,15 @@ public sealed class WebFilterManager
         var allow = NormalizeDomains(policy.WebAllowedDomains);
         var block = NormalizeDomains(policy.WebBlockedDomains);
 
-        // Category rules (prototype): convert categories set to Block into a domain set.
+        // Category rules (prototype): convert categories set to Block/Alert into domain sets.
+        // NOTE: In the current Windows-first hosts-based implementation, "Alert" is tracked separately
+        // but still results in a block page (allow-but-alert requires a deeper network hook).
         var rules = policy.WebCategoryRules ?? Array.Empty<WebCategoryRule>();
         var blockedCategories = rules.Where(r => r.Action == WebRuleAction.Block).Select(r => r.Category).ToHashSet();
+        var alertCategories = rules.Where(r => r.Action == WebRuleAction.Alert).Select(r => r.Category).ToHashSet();
 
         var categoryBlocked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var categoryAlert = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var domain in _categoryEngine.GetKnownDomains())
         {
             var cat = _categoryEngine.Classify(domain);
@@ -58,6 +61,11 @@ public sealed class WebFilterManager
             if (blockedCategories.Contains(cat))
             {
                 categoryBlocked.Add(domain);
+                continue;
+            }
+            if (alertCategories.Contains(cat))
+            {
+                categoryAlert.Add(domain);
             }
         }
 
@@ -68,11 +76,22 @@ public sealed class WebFilterManager
                 categoryBlocked.Add(d);
         }
 
-        // Final blocked set: explicit blocked + category blocked - allow exceptions
+        // Final blocked set: explicit blocked + category blocked + category alert - allow exceptions
         var finalBlocked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in block) finalBlocked.Add(d);
         foreach (var d in categoryBlocked) finalBlocked.Add(d);
+        foreach (var d in categoryAlert) finalBlocked.Add(d);
         foreach (var d in allow) finalBlocked.Remove(d);
+
+        // Attach reasons per domain (best effort) for parent troubleshooting.
+        var reasons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in finalBlocked)
+        {
+            if (categoryAlert.Contains(d)) reasons[d] = "category_alert";
+            else if (categoryBlocked.Contains(d)) reasons[d] = "category_block";
+            else reasons[d] = "explicit_block";
+        }
+        _blockServer.SetDomainReasons(reasons);
 
         // Apply to hosts file only if it changed.
         var applied = true;
@@ -87,11 +106,15 @@ public sealed class WebFilterManager
         // Use a reset-by-heartbeat snapshot so counts represent the interval and don't grow unbounded.
         var blockedItems = _blockServer.TakeTopBlockedDomainsAndReset(maxItems: 8);
 
+        // AlertsToday counts "Alert"-classified hits (best effort).
+        var alertCount = blockedItems.Where(i => string.Equals(i.Reason, "category_alert", StringComparison.OrdinalIgnoreCase))
+            .Sum(i => i.Count);
+
         var report = new WebReport(
             LocalDate: LocalDateString(nowUtc.ToLocalTime()),
             BlockedDomainsConfigured: finalBlocked.Count,
             TopBlockedDomains: blockedItems,
-            AlertsToday: blockedItems.Sum(i => i.Count) // v1: treat blocked attempts as web alerts for Inbox surfacing
+            AlertsToday: alertCount
         );
 
         var circ = _circDetector.Detect(policy.WebCircumventionDetectionEnabled, applied ? null : "hosts_write_failed");

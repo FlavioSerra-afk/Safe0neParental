@@ -10,6 +10,7 @@ internal sealed class WebBlockServer
     private readonly object _lock = new();
     private HttpListener? _listener;
     private readonly Dictionary<string, int> _hits = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _domainReasons = new(StringComparer.OrdinalIgnoreCase);
 
     // Prefer port 80 so hosts-file redirection (domain -> 127.0.0.1) reaches us.
     // Fallback to 8766 if URL ACL / elevation prevents port 80.
@@ -104,7 +105,7 @@ internal sealed class WebBlockServer
             if (_hits.Count == 0) return Array.Empty<WebBlockedDomainItem>();
             var items = _hits.OrderByDescending(kv => kv.Value)
                 .Take(maxItems)
-                .Select(kv => new WebBlockedDomainItem(kv.Key, kv.Value, "hosts_redirect"))
+                .Select(kv => new WebBlockedDomainItem(kv.Key, kv.Value, ReasonFor(kv.Key)))
                 .ToArray();
             return items;
         }
@@ -121,12 +122,31 @@ internal sealed class WebBlockServer
             if (_hits.Count == 0) return Array.Empty<WebBlockedDomainItem>();
             var items = _hits.OrderByDescending(kv => kv.Value)
                 .Take(maxItems)
-                .Select(kv => new WebBlockedDomainItem(kv.Key, kv.Value, "hosts_redirect"))
+                .Select(kv => new WebBlockedDomainItem(kv.Key, kv.Value, ReasonFor(kv.Key)))
                 .ToArray();
 
             _hits.Clear();
             return items;
         }
+    }
+
+    /// <summary>
+    /// Best-effort: attach a reason to each domain, so the parent UI can distinguish
+    /// category "Alert" (allow-but-alert in future) from strict blocks.
+    /// </summary>
+    public void SetDomainReasons(Dictionary<string, string> reasons)
+    {
+        lock (_lock)
+        {
+            _domainReasons = reasons ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private string ReasonFor(string domain)
+    {
+        if (_domainReasons.TryGetValue(domain, out var r) && !string.IsNullOrWhiteSpace(r))
+            return r;
+        return "hosts_redirect";
     }
 
     private static string BuildHtml(string domain, int port)

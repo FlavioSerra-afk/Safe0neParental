@@ -7,10 +7,14 @@
 ## Enforcement (partial)
 Actual enforcement on-device may be best-effort depending on platform and browser.
 
+## Categories (prototype)
+- Categories can be set to **Allow**, **Alert**, or **Block**.
+  - **Allow**: permitted.
+  - **Alert**: tracked as a **Web alert** signal.
+    - **Windows-first note:** current hosts-file enforcement cannot reliably “allow-but-alert” without deeper network hooks.
+      In this prototype, **Alert** is surfaced as an alert signal and may still display the block page.
+  - **Block**: restricted (best effort).
 
-## Web alerts (Inbox)
-
-When **blocked domains** are hit on the child device, the Kid Agent reports a daily **Web Alerts Today** count to the Local Control Plane. The Alerts Inbox will surface a "Web safety" alert when this count is > 0.
-
-- This is **privacy-first**: only aggregate counts and top blocked domains are reported (no full browsing history).
-- To reduce alerts, adjust **Blocked domains** and **Category rules**, or add an exception in **Allowed domains**.
+## Domains (prototype)
+- **Allowed domains** override blocks.
+- **Blocked domains** always block (best effort).
