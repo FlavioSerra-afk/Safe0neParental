@@ -49,6 +49,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |
 | EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | 🟡 | Parent: audit viewer + append on saves | SSOT: append-only audit | 16W8: implemented minimal audit log; expand filters/export later |
+| EPIC-ENG-MODULARITY | Architecture | ControlPlane modularization (partial split by domain) | 🟡 | Dev/maintainability | SSOT: ControlPlane remains single authority; code split only | 16W27: extracted Token/Crypto helpers to partial; continue domain splits to reduce patch risk |
 
 ## How to update this registry (every patch)
 1. Identify affected epic(s) and specific features.
