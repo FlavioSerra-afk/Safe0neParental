@@ -13,7 +13,7 @@ namespace Safe0ne.Shared.Contracts;
 /// constructor arguments (e.g. <c>ChildId:</c>). This DTO exists solely to keep those
 /// tests compiling.
 /// </summary>
-public sealed record ChildHeartbeatRequest(
+public sealed partial record ChildHeartbeatRequest(
     [property: JsonPropertyName("childId")] Guid ChildId,
     [property: JsonPropertyName("deviceName")] string DeviceName,
     [property: JsonPropertyName("agentVersion")] string AgentVersion,
