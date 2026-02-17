@@ -35,6 +35,7 @@ Legend:
 - PATCH_16W19B_childagent_build_fix
 - PATCH_16W20_pairing_token_ttl_revoke
 - PATCH_16W21_policy_sync_watchdog_overdue
+- PATCH_16W24_web_filter_alerts_activity
 
 ## Compatibility assumptions
 Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are planning markers only.

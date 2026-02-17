@@ -1,3 +1,4 @@
+using System.Linq;
 
 using Safe0ne.Shared.Contracts;
 
@@ -90,7 +91,7 @@ public sealed class WebFilterManager
             LocalDate: LocalDateString(nowUtc.ToLocalTime()),
             BlockedDomainsConfigured: finalBlocked.Count,
             TopBlockedDomains: blockedItems,
-            AlertsToday: 0 // v1: alerts are sent via circumvention signals; category "Alert" is a future increment
+            AlertsToday: blockedItems.Sum(i => i.Count) // v1: treat blocked attempts as web alerts for Inbox surfacing
         );
 
         var circ = _circDetector.Detect(policy.WebCircumventionDetectionEnabled, applied ? null : "hosts_write_failed");
