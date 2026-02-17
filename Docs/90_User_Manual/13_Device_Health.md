@@ -24,3 +24,16 @@ Open **Children → select a child → Devices tab**.
 
 ## Online/offline transitions
 When a device transitions **Online ↔ Offline**, a **Device** activity event is recorded in the child Activity feed.
+## Tamper and circumvention signals (best-effort)
+
+The Kid Agent reports **coarse, privacy-first** signals to help you understand when enforcement may be degraded.
+
+### Signals currently reported
+- **Agent not elevated**: the agent is running without admin rights (Windows). Some enforcement actions may fail.
+- **Recent enforcement error**: the agent recently encountered an enforcement failure.
+
+### Where it appears
+- **Activity**: these signals are emitted as activity events so they appear in the child Activity feed (and may be surfaced in Alerts depending on routing).
+- **Troubleshooting**: see `User Manual → Troubleshooting` for common fixes.
+
+> Note: this is not yet “fail-closed”. Self-repair and stronger anti-tamper measures are tracked under EPIC-ANTITAMPER and remain planned.

@@ -47,7 +47,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🔴 | Kid UX | SSOT: policy + runtime state | Planned in KFT-029+ |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
-| EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🔴 | Kid agent + alerts | SSOT: health + tamper signals | Planned in KFT-038+ |
+| EPIC-ANTITAMPER | Resilience | Anti-tamper signals (tamper/circumvention) + activity surfacing | 🟡 | Kid agent heartbeat; Parent: Activity/Alerts | SSOT: TamperSignals + CircumventionSignals + local activity stream | 16W15 emits activity on tamper/circumvention rising edge; enforcement self-repair still planned |
 | EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Parent: Admin → Audit Log | SSOT: append-only audit stream per child | Local endpoint `/api/local/children/{id}/audit` + UI viewer |
 
 ## How to update this registry (every patch)

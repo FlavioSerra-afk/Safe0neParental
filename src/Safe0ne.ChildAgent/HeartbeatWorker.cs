@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Security.Principal;
@@ -596,11 +597,20 @@ if (auth?.DeviceToken is not null)
                     BudgetDepleted: depleted);
 
 
+                var notElevated = OperatingSystem.IsWindows() && !IsRunningElevatedWindows();
+                var enforcementRecent = _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30);
+
+                var tamperNotes = new List<string>();
+                if (notElevated) tamperNotes.Add("agent_not_elevated");
+                if (enforcementRecent) tamperNotes.Add("recent_enforcement_error");
+
                 var tamper = new TamperSignals(
-                    NotRunningElevated: OperatingSystem.IsWindows() && !IsRunningElevatedWindows(),
-                    EnforcementError: _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30),
+                    NotRunningElevated: notElevated,
+                    EnforcementError: enforcementRecent,
                     LastError: _lastEnforcementError,
-                    LastErrorAtUtc: _lastEnforcementErrorAtUtc);
+                    LastErrorAtUtc: _lastEnforcementErrorAtUtc,
+                    Notes: tamperNotes.Count > 0 ? tamperNotes.ToArray() : null);
+
                 var hb = new ChildAgentHeartbeatRequest(
                     DeviceName: deviceName,
                     AgentVersion: agentVersion,

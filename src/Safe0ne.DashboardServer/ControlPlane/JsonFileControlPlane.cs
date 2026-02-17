@@ -1160,6 +1160,70 @@ public bool ClearPendingPairing(ChildId childId)
             var circumvention = req.Circumvention;
             var tamper = req.Tamper;
 
+            // 16W15: Emit local activity events for tamper / circumvention signals (rising edge only).
+            _statusByChildGuid.TryGetValue(key, out var prevStatus);
+            var events = new List<object>();
+
+            var nowEventUtc = DateTimeOffset.UtcNow;
+
+            // Tamper
+            var prevNotElevated = prevStatus?.Tamper?.NotRunningElevated ?? false;
+            if (tamper?.NotRunningElevated == true && !prevNotElevated)
+            {
+                events.Add(new
+                {
+                    kind = TamperActivityEventKinds.AgentNotElevated,
+                    occurredAtUtc = nowEventUtc,
+                    severity = "Warning",
+                    details = "Agent is not running elevated; enforcement may be degraded."
+                });
+            }
+
+            var prevEnforcementErr = prevStatus?.Tamper?.EnforcementError ?? false;
+            if (tamper?.EnforcementError == true && !prevEnforcementErr)
+            {
+                events.Add(new
+                {
+                    kind = TamperActivityEventKinds.AgentEnforcementError,
+                    occurredAtUtc = nowEventUtc,
+                    severity = "Warning",
+                    details = tamper.LastError ?? "Agent enforcement error (recent)."
+                });
+            }
+
+            // Circumvention (best-effort)
+            var circ = circumvention;
+            var prevCirc = prevStatus?.Circumvention;
+            if (circ?.VpnSuspected == true && (prevCirc?.VpnSuspected ?? false) == false)
+            {
+                events.Add(new { kind = TamperActivityEventKinds.CircumventionVpnSuspected, occurredAtUtc = nowEventUtc, severity = "Info", details = "VPN suspected." });
+            }
+            if (circ?.ProxyEnabled == true && (prevCirc?.ProxyEnabled ?? false) == false)
+            {
+                events.Add(new { kind = TamperActivityEventKinds.CircumventionProxyEnabled, occurredAtUtc = nowEventUtc, severity = "Info", details = "Proxy appears enabled." });
+            }
+            if (circ?.PublicDnsDetected == true && (prevCirc?.PublicDnsDetected ?? false) == false)
+            {
+                events.Add(new { kind = TamperActivityEventKinds.CircumventionPublicDnsDetected, occurredAtUtc = nowEventUtc, severity = "Info", details = "Public DNS detected." });
+            }
+            if (circ?.HostsWriteFailed == true && (prevCirc?.HostsWriteFailed ?? false) == false)
+            {
+                events.Add(new { kind = TamperActivityEventKinds.CircumventionHostsWriteFailed, occurredAtUtc = nowEventUtc, severity = "Warning", details = "Hosts file write failed." });
+            }
+
+            if (events.Count > 0)
+            {
+                try
+                {
+                    var json = JsonSerializer.Serialize(events, JsonDefaults.Options);
+                    AppendLocalActivityJsonUnsafe_NoLock(key, json);
+                }
+                catch
+                {
+                    // Ignore activity emission failures.
+                }
+            }
+
             var status = new ChildAgentStatus(
                 ChildId: childId,
                 LastSeenUtc: DateTimeOffset.UtcNow,
