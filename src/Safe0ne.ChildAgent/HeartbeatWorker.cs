@@ -1,7 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Security.Principal;
@@ -597,20 +596,15 @@ if (auth?.DeviceToken is not null)
                     BudgetDepleted: depleted);
 
 
-                var notElevated = OperatingSystem.IsWindows() && !IsRunningElevatedWindows();
-                var enforcementRecent = _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30);
-
-                var tamperNotes = new List<string>();
-                if (notElevated) tamperNotes.Add("agent_not_elevated");
-                if (enforcementRecent) tamperNotes.Add("recent_enforcement_error");
-
                 var tamper = new TamperSignals(
-                    NotRunningElevated: notElevated,
-                    EnforcementError: enforcementRecent,
+                    NotRunningElevated: OperatingSystem.IsWindows() && !IsRunningElevatedWindows(),
+                    EnforcementError: _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30),
                     LastError: _lastEnforcementError,
-                    LastErrorAtUtc: _lastEnforcementErrorAtUtc,
-                    Notes: tamperNotes.Count > 0 ? tamperNotes.ToArray() : null);
-
+                    LastErrorAtUtc: _lastEnforcementErrorAtUtc);
+                // Build the strongly-typed heartbeat envelope first, then (optionally) enrich
+                // the JSON payload with policy replay / observability fields. We do the JSON
+                // enrichment to remain resilient to contract drift while keeping the server
+                // compatible (extra fields are ignored if unknown).
                 var hb = new ChildAgentHeartbeatRequest(
                     DeviceName: deviceName,
                     AgentVersion: agentVersion,
@@ -620,15 +614,28 @@ if (auth?.DeviceToken is not null)
                     Apps: appTracker.BuildReport(),
                     Web: webReport,
                     Circumvention: circ,
-                    Tamper: tamper,
-					LastAppliedPolicyVersion: lastAppliedPolicyVersion,
-					LastAppliedPolicyEffectiveAtUtc: lastAppliedPolicyEffectiveAtUtc,
-					LastAppliedPolicyFingerprint: lastAppliedPolicyFingerprint);
+                    Tamper: tamper);
 
-                using var resp = await client.PostAsJsonAsync(
+                var hbNode = System.Text.Json.JsonSerializer.SerializeToNode(hb, JsonDefaults.Options) as System.Text.Json.Nodes.JsonObject
+                    ?? new System.Text.Json.Nodes.JsonObject();
+
+                // 16W14+: policy replay protection + observability (camelCase per JsonDefaults)
+                if (lastAppliedPolicyVersion is not null)
+                {
+                    hbNode["lastAppliedPolicyVersion"] = lastAppliedPolicyVersion;
+                }
+                if (lastAppliedPolicyEffectiveAtUtc is not null)
+                {
+                    hbNode["lastAppliedPolicyEffectiveAtUtc"] = lastAppliedPolicyEffectiveAtUtc;
+                }
+                if (!string.IsNullOrWhiteSpace(lastAppliedPolicyFingerprint))
+                {
+                    hbNode["lastAppliedPolicyFingerprint"] = lastAppliedPolicyFingerprint;
+                }
+
+                using var resp = await client.PostAsync(
                     $"/api/{ApiVersions.V1}/children/{childId.Value}/heartbeat",
-                    hb,
-                    JsonDefaults.Options,
+                    System.Net.Http.Json.JsonContent.Create(hbNode, options: JsonDefaults.Options),
                     stoppingToken);
 
                 if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
