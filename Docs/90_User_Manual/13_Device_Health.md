@@ -14,7 +14,7 @@ Open **Children → select a child → Devices tab**.
 
 ## Troubleshooting
 - If a device stays Offline, confirm the Kid agent is running.
-- If the device is paired but heartbeats are Unauthorized, re-pair to refresh the device token.
+- If the device is paired but heartbeats are Unauthorized, the token may be **revoked** or **expired**. Re-pair to issue a fresh token (or unpair + pair again).
 
 
 ## Status reasons (Needs attention)
@@ -49,6 +49,16 @@ Safe0ne tracks two related policy values:
 ### Why they can differ
 - The device is **offline** and has not received the latest policy yet.
 - The Kid agent is enforcing from its **last-known-good cache** (offline-first fallback).
+
+### Watchdog (Pending / Overdue)
+When the configured policy version is newer than the last applied version, Safe0ne surfaces:
+
+- **Pending**: mismatch detected (expected during brief offline windows).
+- **Overdue**: mismatch persisted beyond the watchdog threshold (default ~10 minutes).
+
+Overdue typically means the device has been offline for a while, pairing token is invalid/expired, or the agent is unhealthy.
+
+> Diagnostics: for local testing, the watchdog threshold can be overridden via `SAFE0NE_POLICY_WATCHDOG_MINUTES` (or `SAFE0NE_POLICY_WATCHDOG_SECONDS` in test environments).
 
 ### Apply failures
 If the Kid agent observes a best-effort **apply/enforcement error**, Safe0ne records a `policy_apply_failed` activity event and surfaces the last error under Device Health.

@@ -1467,6 +1467,30 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
     return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
+// Revoke a device token (parent action). Keeps the device record but makes auth fail.
+local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid deviceId, JsonFileControlPlane cp) =>
+{
+    RevokeDeviceTokenRequest? body = null;
+    try
+    {
+        body = await req.ReadFromJsonAsync<RevokeDeviceTokenRequest>(JsonDefaults.Options);
+    }
+    catch
+    {
+        body = null;
+    }
+
+    var revokedBy = body?.RevokedBy ?? "parent";
+    var reason = body?.Reason;
+
+    if (!cp.TryRevokeDeviceToken(deviceId, revokedBy, reason, out var childId))
+    {
+        return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
+    }
+
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+});
+
 // Requests / Activity / Location (Local Mode)
 
 // Requests

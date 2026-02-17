@@ -52,6 +52,10 @@ const Safe0neApi = {
     return await _del(`/api/local/devices/${encodeURIComponent(deviceId)}`);
   },
 
+  async revokeDeviceTokenLocal(deviceId, payload){
+    return await _post(`/api/local/devices/${encodeURIComponent(deviceId)}/revoke`, payload || {});
+  },
+
   // Local Mode: Activity
   async getChildActivityLocal(childId, opts){
     const params = [];

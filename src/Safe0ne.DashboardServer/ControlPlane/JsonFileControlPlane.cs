@@ -28,7 +28,7 @@ public sealed class JsonFileControlPlane
         public DateTimeOffset? ArchivedAt => ArchivedAtUtc;
     }
 
-private const int CurrentSchemaVersion = 2;
+private const int CurrentSchemaVersion = 3;
     private const int MinSupportedSchemaVersion = 1;
 
 
@@ -865,6 +865,36 @@ public bool TryUnpairDevice(Guid deviceId, out ChildId childId)
     }
 }
 
+public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId childId)
+{
+    lock (_gate)
+    {
+        childId = default;
+        foreach (var kvp in _devicesByChildGuid)
+        {
+            var devices = kvp.Value;
+            var idx = devices.FindIndex(d => d.DeviceId == deviceId);
+            if (idx < 0) continue;
+
+            var cur = devices[idx];
+            if (cur.TokenRevokedAtUtc is null)
+            {
+                devices[idx] = cur with
+                {
+                    TokenRevokedAtUtc = DateTimeOffset.UtcNow,
+                    TokenRevokedBy = string.IsNullOrWhiteSpace(revokedBy) ? "parent" : revokedBy.Trim()
+                };
+                PersistUnsafe_NoLock();
+            }
+
+            childId = new ChildId(Guid.Parse(kvp.Key));
+            return true;
+        }
+
+        return false;
+    }
+}
+
 public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
 {
     lock (_gate)
@@ -916,13 +946,27 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 lastSeen = s.LastSeenUtc;
             }
 
+            var now = DateTimeOffset.UtcNow;
             return devices
-                .Select(d => new ChildDeviceSummary(
-                    DeviceId: d.DeviceId,
-                    DeviceName: d.DeviceName,
-                    AgentVersion: d.AgentVersion,
-                    PairedAtUtc: d.PairedAtUtc,
-                    LastSeenUtc: lastSeen))
+                .Select(d =>
+                {
+                    var issuedAt = d.TokenIssuedAtUtc == default ? d.PairedAtUtc : d.TokenIssuedAtUtc;
+                    var expiresAt = d.TokenExpiresAtUtc == default ? issuedAt.Add(GetDeviceTokenTtl()) : d.TokenExpiresAtUtc;
+                    var revoked = d.TokenRevokedAtUtc is not null;
+                    var expired = expiresAt <= now;
+                    return new ChildDeviceSummary(
+                        DeviceId: d.DeviceId,
+                        DeviceName: d.DeviceName,
+                        AgentVersion: d.AgentVersion,
+                        PairedAtUtc: d.PairedAtUtc,
+                        LastSeenUtc: lastSeen,
+                        TokenIssuedAtUtc: issuedAt,
+                        TokenExpiresAtUtc: expiresAt,
+                        TokenRevokedAtUtc: d.TokenRevokedAtUtc,
+                        TokenRevokedBy: d.TokenRevokedBy,
+                        TokenExpired: expired,
+                        TokenRevoked: revoked);
+                })
                 .ToList();
         }
     }
@@ -950,6 +994,20 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var hash = ComputeSha256Hex(token);
             var match = devices.FirstOrDefault(d => string.Equals(d.TokenHashSha256, hash, StringComparison.OrdinalIgnoreCase));
             if (match is null)
+            {
+                return false;
+            }
+
+            // Pairing hardening: token can be revoked or expired.
+            var now = DateTimeOffset.UtcNow;
+            if (match.TokenRevokedAtUtc is not null)
+            {
+                return false;
+            }
+            var issuedAt = match.TokenIssuedAtUtc == default ? match.PairedAtUtc : match.TokenIssuedAtUtc;
+            var expiresAt = match.TokenExpiresAtUtc == default ? issuedAt.Add(GetDeviceTokenTtl()) : match.TokenExpiresAtUtc;
+
+            if (expiresAt <= now)
             {
                 return false;
             }
@@ -1079,12 +1137,19 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 deviceId = Guid.NewGuid();
             }
 
+            var issuedAt = DateTimeOffset.UtcNow;
+            var expiresAt = issuedAt.Add(GetDeviceTokenTtl());
+
             devices.Add(new PairedDevice(
                 DeviceId: deviceId,
                 DeviceName: deviceName,
                 AgentVersion: agentVersion,
-                PairedAtUtc: DateTimeOffset.UtcNow,
-                TokenHashSha256: tokenHash));
+                PairedAtUtc: issuedAt,
+                TokenHashSha256: tokenHash,
+                TokenIssuedAtUtc: issuedAt,
+                TokenExpiresAtUtc: expiresAt,
+                TokenRevokedAtUtc: null,
+                TokenRevokedBy: null));
 
             // One-time code is consumed.
             _pendingPairingByChildGuid.Remove(key);
@@ -1092,7 +1157,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             EnsureChildProfileUnsafe_NoLock(childId);
             PersistUnsafe_NoLock();
 
-            return new PairingCompleteResponse(childId, deviceId, token, DateTimeOffset.UtcNow);
+            return new PairingCompleteResponse(childId, deviceId, token, issuedAt);
         }
     }
 
@@ -1113,6 +1178,18 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var lastPolicyApplyFailedAtUtc = req.LastPolicyApplyFailedAtUtc ?? priorStatus?.LastPolicyApplyFailedAtUtc;
             var lastPolicyApplyError = !string.IsNullOrWhiteSpace(req.LastPolicyApplyError) ? req.LastPolicyApplyError : priorStatus?.LastPolicyApplyError;
 
+
+            // 16W21: watchdog computed fields (persisted for parent UX).
+            var now = DateTimeOffset.UtcNow;
+            var desiredPolicyVersion = effective.PolicyVersion.Value;
+            var appliedPolicyVersion = lastAppliedPolicyVersion;
+
+            var policyPending = appliedPolicyVersion is null || appliedPolicyVersion.Value < desiredPolicyVersion;
+            var pendingSince = policyPending ? (priorStatus?.PolicyApplyPendingSinceUtc ?? now) : null;
+            var overdue = policyPending && pendingSince is not null && (now - pendingSince.Value) >= GetPolicyWatchdogThreshold();
+
+            var failedRecent = lastPolicyApplyFailedAtUtc is not null && (now - lastPolicyApplyFailedAtUtc.Value) < TimeSpan.FromMinutes(30);
+            var policyApplyState = failedRecent && policyPending ? "Failed" : (overdue ? "Overdue" : (policyPending ? "Pending" : "UpToDate"));
 
             // K4: Store a privacy-first screen time summary for parent reporting.
             _policiesByChildGuid.TryGetValue(key, out var policy);
@@ -1225,7 +1302,11 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 LastAppliedPolicyEffectiveAtUtc: lastAppliedPolicyEffectiveAtUtc,
                 LastAppliedPolicyFingerprint: lastAppliedPolicyFingerprint,
                 LastPolicyApplyFailedAtUtc: lastPolicyApplyFailedAtUtc,
-                LastPolicyApplyError: lastPolicyApplyError);
+                LastPolicyApplyError: lastPolicyApplyError,
+                PolicyApplyPendingSinceUtc: pendingSince,
+                PolicyApplyOverdue: overdue,
+                PolicyApplyState: policyApplyState,
+                LastKnownGoodPolicyVersion: lastAppliedPolicyVersion);
 
             _statusByChildGuid[key] = status;
 
@@ -1943,6 +2024,72 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         return Convert.ToBase64String(bytes);
     }
 
+    private static TimeSpan GetDeviceTokenTtl()
+    {
+        // Pairing hardening: allow token TTL override for testing and future policy.
+        // Defaults to 30 days.
+        // Env (first match wins):
+        //  - SAFE0NE_DEVICE_TOKEN_TTL_SECONDS
+        //  - SAFE0NE_DEVICE_TOKEN_TTL_MINUTES
+        //  - SAFE0NE_DEVICE_TOKEN_TTL_DAYS
+        try
+        {
+            var rawSeconds = Environment.GetEnvironmentVariable("SAFE0NE_DEVICE_TOKEN_TTL_SECONDS");
+            if (!string.IsNullOrWhiteSpace(rawSeconds) && int.TryParse(rawSeconds, out var s) && s > 0)
+            {
+                return TimeSpan.FromSeconds(s);
+            }
+
+            var rawMinutes = Environment.GetEnvironmentVariable("SAFE0NE_DEVICE_TOKEN_TTL_MINUTES");
+            if (!string.IsNullOrWhiteSpace(rawMinutes) && int.TryParse(rawMinutes, out var m) && m > 0)
+            {
+                return TimeSpan.FromMinutes(m);
+            }
+
+            var rawDays = Environment.GetEnvironmentVariable("SAFE0NE_DEVICE_TOKEN_TTL_DAYS");
+            if (!string.IsNullOrWhiteSpace(rawDays) && int.TryParse(rawDays, out var d) && d > 0)
+            {
+                return TimeSpan.FromDays(d);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return TimeSpan.FromDays(30);
+    
+
+    private static TimeSpan GetPolicyWatchdogThreshold()
+    {
+        // 16W21: policy sync watchdog. If configured policy version is newer than applied
+        // and the mismatch persists beyond this threshold, surface an overdue state.
+        // Defaults to 10 minutes.
+        // Overrides for tests / diagnostics (first match wins):
+        //  - SAFE0NE_POLICY_WATCHDOG_SECONDS
+        //  - SAFE0NE_POLICY_WATCHDOG_MINUTES
+        try
+        {
+            var rawSeconds = Environment.GetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS");
+            if (!string.IsNullOrWhiteSpace(rawSeconds) && int.TryParse(rawSeconds, out var s) && s > 0)
+            {
+                return TimeSpan.FromSeconds(s);
+            }
+
+            var rawMinutes = Environment.GetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_MINUTES");
+            if (!string.IsNullOrWhiteSpace(rawMinutes) && int.TryParse(rawMinutes, out var mins) && mins > 0)
+            {
+                return TimeSpan.FromMinutes(mins);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+        return TimeSpan.FromMinutes(10);
+    }
+}
+
     private static string ComputeSha256Hex(string input)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(input);
@@ -1955,7 +2102,11 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         string DeviceName,
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
-        string TokenHashSha256);
+        string TokenHashSha256,
+        DateTimeOffset TokenIssuedAtUtc = default,
+        DateTimeOffset TokenExpiresAtUtc = default,
+        DateTimeOffset? TokenRevokedAtUtc = null,
+        string? TokenRevokedBy = null);
 
     private sealed record PendingPairing(
         ChildId ChildId,

@@ -538,15 +538,23 @@ function renderDevicesTab(child) {
     .map((d) => {
       const devId = String(d?.deviceId ?? d?.id ?? "");
       const name = String(d?.deviceName ?? d?.name ?? "Device");
-      const status = String(d?.status ?? (devId ? "Enrolled" : "Not paired"));
+      const revoked = !!(d?.tokenRevoked || d?.tokenRevokedAtUtc);
+      const expired = !!(d?.tokenExpired || (d?.tokenExpiresAtUtc && (new Date(d.tokenExpiresAtUtc)).getTime() <= Date.now()));
+      const status = String(d?.status ?? (revoked ? "Revoked" : (expired ? "Expired" : (devId ? "Active" : "Not paired"))));
       const lastSeen = d?.lastSeenUtc ? new Date(d.lastSeenUtc).toLocaleString() : (d?.lastSeen || "—");
+      const tokenExpires = d?.tokenExpiresAtUtc ? new Date(d.tokenExpiresAtUtc).toLocaleString() : null;
+      const tokenMeta = (revoked && d?.tokenRevokedAtUtc)
+        ? `Revoked: ${new Date(d.tokenRevokedAtUtc).toLocaleString()}${d?.tokenRevokedBy ? ` by ${String(d.tokenRevokedBy)}` : ""}`
+        : (tokenExpires ? `Token expires: ${tokenExpires}` : "");
       const canUnpair = useApi && devId;
+      const canRevoke = useApi && devId && !revoked;
       return `
     <div class="tr">
       <div><strong>${escapeHtml(name)}</strong></div>
       <div><span class="so-pill">${escapeHtml(status)}</span></div>
-      <div class="so-card-sub">${escapeHtml(lastSeen)}</div>
+      <div class="so-card-sub">${escapeHtml(lastSeen)}${tokenMeta ? `<div class="so-card-sub" style="margin-top:6px;">${escapeHtml(tokenMeta)}</div>` : ""}</div>
       <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+        ${canRevoke ? `<button class="so-btn" data-action="revokeDeviceToken" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Revoke token</button>` : ""}
         ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
       </div>
     </div>`;
@@ -2533,6 +2541,20 @@ if (action === "unpairDevice") {
     .then(() => Promise.resolve(refreshDevicesFromApi(cid)))
     .then(() => window.Safe0neRouter?.render?.())
     .catch(() => window.Safe0neUi?.toast?.("Unpair failed", "Could not unpair device."));
+  return;
+}
+
+if (action === "revokeDeviceToken") {
+  ev.preventDefault();
+  const cid = childId || "";
+  const deviceId = btn.getAttribute("data-deviceid") || "";
+  if (!deviceId) return;
+  if (!confirm("Revoke this device token? The Kid device will become Unauthorized until re-paired.")) return;
+  if (!state?.api?.available || !window.Safe0neApi?.revokeDeviceTokenLocal) return;
+  Promise.resolve(window.Safe0neApi.revokeDeviceTokenLocal(deviceId, { revokedBy: "parent" }))
+    .then(() => Promise.resolve(refreshDevicesFromApi(cid)))
+    .then(() => window.Safe0neRouter?.render?.())
+    .catch(() => window.Safe0neUi?.toast?.("Revoke failed", "Could not revoke device token."));
   return;
 }
 

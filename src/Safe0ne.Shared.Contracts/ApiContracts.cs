@@ -139,7 +139,12 @@ public sealed record ChildAgentHeartbeatRequest(
     string? LastAppliedPolicyFingerprint = null,
     // 16W19: best-effort apply failure signal (activity-backed; persisted as status fields too)
     DateTimeOffset? LastPolicyApplyFailedAtUtc = null,
-    string? LastPolicyApplyError = null
+    string? LastPolicyApplyError = null,
+    // 16W21: watchdog / rollback hints for policy sync
+    DateTimeOffset? PolicyApplyPendingSinceUtc = null,
+    bool PolicyApplyOverdue = false,
+    string? PolicyApplyState = null,
+    long? LastKnownGoodPolicyVersion = null
 );
 
 /// <summary>
@@ -188,7 +193,12 @@ public sealed record ChildAgentStatus(
     DateTimeOffset? LastAppliedPolicyEffectiveAtUtc = null,
     string? LastAppliedPolicyFingerprint = null,
     DateTimeOffset? LastPolicyApplyFailedAtUtc = null,
-    string? LastPolicyApplyError = null
+    string? LastPolicyApplyError = null,
+    // 16W21: watchdog / rollback hints for policy sync
+    DateTimeOffset? PolicyApplyPendingSinceUtc = null,
+    bool PolicyApplyOverdue = false,
+    string? PolicyApplyState = null,
+    long? LastKnownGoodPolicyVersion = null
 );
 
 /// <summary>
@@ -221,7 +231,21 @@ public sealed record ChildDeviceSummary(
     string DeviceName,
     string AgentVersion,
     DateTimeOffset PairedAtUtc,
-    DateTimeOffset? LastSeenUtc = null);
+    DateTimeOffset? LastSeenUtc = null,
+    // Pairing hardening: token metadata for observability and revoke/expiry.
+    DateTimeOffset? TokenIssuedAtUtc = null,
+    DateTimeOffset? TokenExpiresAtUtc = null,
+    DateTimeOffset? TokenRevokedAtUtc = null,
+    string? TokenRevokedBy = null,
+    bool TokenExpired = false,
+    bool TokenRevoked = false);
+
+/// <summary>
+/// Parent -> Control Plane: revoke a device token without deleting the device record.
+/// </summary>
+public sealed record RevokeDeviceTokenRequest(
+    string? RevokedBy = null,
+    string? Reason = null);
 
 /// <summary>
 /// Command types for Control Plane -> Child Agent messages.

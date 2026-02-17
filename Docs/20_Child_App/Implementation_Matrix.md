@@ -15,6 +15,8 @@ Legend:
 - PATCH_16R_screen_time_grace_warnings_config (policy surface; enforcement may be partial)
 - PATCH_16S_per_app_limits_authoring_ui_validation (policy surface; enforcement may be partial)
 - PATCH_16T_safesearch_restricted_toggles_persisted (policy persistence; enforcement may be partial)
+- PATCH_16W19_policy_sync_versioning_hardening (agent reports applied version/fingerprint)
+- PATCH_16W21_policy_sync_watchdog_overdue (server watchdog surfaces overdue/pending)
 
 ## Child components
 - **Kid Agent (Windows-first):** enforcement + telemetry + applying grants/policies
@@ -26,7 +28,7 @@ Legend:
 |---|---|---|---|---|---|
 | K-FOUND-001 | Foundation | Consume shared contracts (DTOs/enums) | Win✅ | ✅ | Shared contracts baseline. |
 | K-SSOT-001 | SSOT | Read policy + grants from Local Control Plane | Win✅ | ✅ | Required for request loop. |
-| K-POLSYNC-001 | Agent | Policy sync replay protection + apply ack (version/fingerprint) | Win✅ | 🟡 | PATCH_16W19 (extends 16W14) |
+| K-POLSYNC-001 | Agent | Policy sync replay protection + apply ack (version/fingerprint) | Win✅ | 🟡 | 16W19: apply ack fields. 16W21: watchdog surfacing (server-side). Rollback/integrity still planned. |
 | K-REQ-001 | Agent | Apply approved grants (time-boxed exceptions) | Win✅ | ✅ | “Request loop” baseline. |
 | K-REQ-002 | Kid UX | Create/request exceptions (child → parent) | Win✅ | ✅ | Must remain working. |
 | K-LOC-001 | Agent | Geofence evaluation (inside/outside) | Win✅ | ✅ | PATCH_16U14 |
@@ -38,7 +40,7 @@ Legend:
 | K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | 🟡 | PATCH_16T persists toggles; enforcement TBD. |
 | K-ALERT-001 | Agent | Telemetry → Alerts/Activity pipeline | Win✅ | ✅ | Geofence activity verified; other signals planned. |
 | K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | 🟡 | Planned UX baseline; ensure no-jargon. |
-| K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Planned; part of pairing/health hardening. |
+| K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Heartbeat is implemented; pairing hardening now includes token revoke/expiry checks (16W20). Health enrichment remains ongoing. |
 | K-ANTITAMPER-001 | Agent | Anti-tamper stubs | Win✅ | 🟡 | Signals reported in heartbeat; parent alerting + policy gates implemented (16W15–16W17). Enforcement hardening still TBD. |
 
 ## Notes

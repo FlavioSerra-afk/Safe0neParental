@@ -10,4 +10,4 @@
 3. Complete the modal flow to create a new child.
 4. Open the child profile to see the available **tabs**.
 
-> Device pairing is planned; until pairing is implemented, child profiles are managed locally-first.
+> Pairing is implemented (local-first) and connects a Kid device to a child profile. See **Device Pairing**.

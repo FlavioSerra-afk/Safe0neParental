@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Safe0ne.Shared.Contracts;
 using Xunit;
 
 namespace Safe0ne.DashboardServer.Tests;
@@ -94,6 +95,155 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         using var stDoc = JsonDocument.Parse(await st.Content.ReadAsStringAsync());
         var lastApplied = stDoc.RootElement.GetProperty("data").GetProperty("lastAppliedPolicyVersion").GetInt64();
         Assert.Equal(v2, lastApplied);
+    }
+
+    [Fact]
+    public async Task DeviceToken_Revoke_MakesHeartbeatUnauthorized()
+    {
+        using var client = _factory.CreateClient();
+
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Token Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var id = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(id));
+
+        // Start pairing
+        var start = await client.PostAsync($"/api/local/children/{id}/devices/pair", null);
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+        using var startDoc = JsonDocument.Parse(await start.Content.ReadAsStringAsync());
+        var code = startDoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(code));
+
+        // Enroll device
+        var enroll = await client.PostAsJsonAsync("/api/local/devices/enroll", new { pairingCode = code, deviceName = "TDev", agentVersion = "0.0.0-test" });
+        Assert.Equal(HttpStatusCode.OK, enroll.StatusCode);
+        using var enrollDoc = JsonDocument.Parse(await enroll.Content.ReadAsStringAsync());
+        var token = enrollDoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
+        var deviceId = enrollDoc.RootElement.GetProperty("data").GetProperty("deviceId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        Assert.False(string.IsNullOrWhiteSpace(deviceId));
+
+        // Authenticated heartbeat should be OK
+        client.DefaultRequestHeaders.Remove(AgentAuth.DeviceTokenHeaderName);
+        client.DefaultRequestHeaders.Add(AgentAuth.DeviceTokenHeaderName, token);
+        var hb = new { deviceName = "TDev", agentVersion = "0.0.0-test", sentAtUtc = DateTimeOffset.UtcNow };
+        var hbOk = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+        Assert.Equal(HttpStatusCode.OK, hbOk.StatusCode);
+
+        // Revoke token
+        var revoke = await client.PostAsJsonAsync($"/api/local/devices/{deviceId}/revoke", new { revokedBy = "test" });
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+
+        // Same token must now be rejected
+        var hbFail = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+        Assert.Equal(HttpStatusCode.Unauthorized, hbFail.StatusCode);
+    }
+
+    [Fact]
+    public async Task PolicyWatchdog_MarksOverdue_WhenAppliedLagsTooLong()
+    {
+        Environment.SetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS", "1");
+        try
+        {
+            using var localFactory = new WebApplicationFactory<Program>();
+            using var client = localFactory.CreateClient();
+
+            var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Watchdog Child" });
+            Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+            using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+            var id = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(id));
+
+            // Get current policy version (v1)
+            var get1 = await client.GetAsync($"/api/local/children/{id}/policy");
+            Assert.Equal(HttpStatusCode.OK, get1.StatusCode);
+            using var doc1 = JsonDocument.Parse(await get1.Content.ReadAsStringAsync());
+            var v1 = doc1.RootElement.GetProperty("data").GetProperty("policyVersion").GetInt32();
+
+            // Bump to v2
+            var put = await client.PutAsJsonAsync($"/api/local/children/{id}/policy", new { policy = new { mode = "Lockdown" } });
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+            using var putDoc = JsonDocument.Parse(await put.Content.ReadAsStringAsync());
+            var v2 = putDoc.RootElement.GetProperty("data").GetProperty("policyVersion").GetInt32();
+            Assert.True(v2 > v1);
+
+            // Heartbeat claims it only applied v1 => pending
+            var hb = new { deviceName = "WDev", agentVersion = "0.0.0-test", sentAtUtc = DateTimeOffset.UtcNow, lastAppliedPolicyVersion = (long)v1 };
+            var hb1 = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+            Assert.Equal(HttpStatusCode.OK, hb1.StatusCode);
+
+            var st1 = await client.GetAsync($"/api/v1/children/{id}/status");
+            Assert.Equal(HttpStatusCode.OK, st1.StatusCode);
+            using var st1Doc = JsonDocument.Parse(await st1.Content.ReadAsStringAsync());
+            var state1 = st1Doc.RootElement.GetProperty("data").GetProperty("policyApplyState").GetString();
+            Assert.Equal("Pending", state1);
+
+            await Task.Delay(1200);
+
+            // Second heartbeat should preserve pendingSince and flip to overdue
+            var hb2 = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+            Assert.Equal(HttpStatusCode.OK, hb2.StatusCode);
+
+            var st2 = await client.GetAsync($"/api/v1/children/{id}/status");
+            Assert.Equal(HttpStatusCode.OK, st2.StatusCode);
+            using var st2Doc = JsonDocument.Parse(await st2.Content.ReadAsStringAsync());
+            var overdue = st2Doc.RootElement.GetProperty("data").GetProperty("policyApplyOverdue").GetBoolean();
+            var state2 = st2Doc.RootElement.GetProperty("data").GetProperty("policyApplyState").GetString();
+            Assert.True(overdue);
+            Assert.Equal("Overdue", state2);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS", null);
+        }
+    }
+
+
+    [Fact]
+    public async Task DeviceToken_Expires_WhenTtlIsShort()
+    {
+        // Deterministic TTL for this test.
+        Environment.SetEnvironmentVariable("SAFE0NE_DEVICE_TOKEN_TTL_SECONDS", "1");
+        try
+        {
+            using var localFactory = new WebApplicationFactory<Program>();
+            using var client = localFactory.CreateClient();
+
+            var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Expiry Child" });
+            Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+            using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+            var id = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(id));
+
+            var start = await client.PostAsync($"/api/local/children/{id}/devices/pair", null);
+            Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+            using var startDoc = JsonDocument.Parse(await start.Content.ReadAsStringAsync());
+            var code = startDoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(code));
+
+            var enroll = await client.PostAsJsonAsync("/api/local/devices/enroll", new { pairingCode = code, deviceName = "EDev", agentVersion = "0.0.0-test" });
+            Assert.Equal(HttpStatusCode.OK, enroll.StatusCode);
+            using var enrollDoc = JsonDocument.Parse(await enroll.Content.ReadAsStringAsync());
+            var token = enrollDoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(token));
+
+            client.DefaultRequestHeaders.Remove(AgentAuth.DeviceTokenHeaderName);
+            client.DefaultRequestHeaders.Add(AgentAuth.DeviceTokenHeaderName, token);
+
+            var hb = new { deviceName = "EDev", agentVersion = "0.0.0-test", sentAtUtc = DateTimeOffset.UtcNow };
+            var hbOk = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+            Assert.Equal(HttpStatusCode.OK, hbOk.StatusCode);
+
+            await Task.Delay(1500);
+
+            var hbExpired = await client.PostAsJsonAsync($"/api/v1/children/{id}/heartbeat", hb);
+            Assert.Equal(HttpStatusCode.Unauthorized, hbExpired.StatusCode);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SAFE0NE_DEVICE_TOKEN_TTL_SECONDS", null);
+        }
     }
 
 }

@@ -1033,8 +1033,10 @@ webCategoryRules.forEach(r => {
         <div style="font-weight:700;margin-bottom:6px;">Policy apply</div>
         <div>Last applied version: <strong>${status && status.lastAppliedPolicyVersion ? escapeHtml(String(status.lastAppliedPolicyVersion)) : "—"}</strong></div>
         <div>Applied at: <strong>${status && status.lastAppliedPolicyEffectiveAtUtc ? escapeHtml(String(status.lastAppliedPolicyEffectiveAtUtc)) : "—"}</strong></div>
-        <div>Apply status: <strong>${status && status.lastPolicyApplyFailedAtUtc ? ("Failed") : "OK"}</strong></div>
-        <div class="hint" style="margin-top:6px;">If the device is offline or enforcing from cache, the applied version may lag behind the configured policy version.</div>
+        <div>Apply state: <strong>${status && status.policyApplyState ? escapeHtml(String(status.policyApplyState)) : (status && status.lastPolicyApplyFailedAtUtc ? "Failed" : "OK")}</strong>${status && status.policyApplyOverdue ? ' <span class="pill" style="margin-left:6px;">OVERDUE</span>' : ''}</div>
+        <div>Pending since: <strong>${status && status.policyApplyPendingSinceUtc ? escapeHtml(String(status.policyApplyPendingSinceUtc)) : "—"}</strong></div>
+        <div class="hint" style="margin-top:6px;">Watchdog: if configured policy is newer than applied for too long, we surface an overdue signal. Devices can enforce from cache; transient mismatch is expected when offline.</div>
+        ${status && status.policyApplyOverdue ? '<div class="notice notice--warn" style="margin-top:8px;">Policy appears out of date on the device. If this persists, check device connectivity and pairing token status.</div>' : ''}
         ${status && status.lastPolicyApplyFailedAtUtc ? '<div class="notice notice--danger" style="margin-top:8px;">Last apply/enforcement error: <span class="mono">' + escapeHtml(String(status.lastPolicyApplyError || "unknown")) + '</span><br/><span class="muted">at ' + escapeHtml(String(status.lastPolicyApplyFailedAtUtc)) + '</span></div>' : ''}
       </div>
     </div>
