@@ -246,8 +246,6 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         }
     }
 
-}
-
     [Fact]
     public async Task PolicyRollback_IsRecommended_OnFailure_And_RollbackEndpoint_RevertsSnapshot()
     {
@@ -316,3 +314,5 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         Assert.Equal("Lockdown", rbMode);
         Assert.True(rbVer > v3);
     }
+
+}
