@@ -649,6 +649,10 @@ const webYouTubeRestrictedModeEnabled = (() => {
   return !!policy.webYouTubeRestrictedModeEnabled;
 })();
 const webCircumventionDetectionEnabled = (policy.webCircumventionDetectionEnabled == null) ? true : !!policy.webCircumventionDetectionEnabled;
+const deviceTamperDetectionEnabled = (policy.deviceTamperDetectionEnabled == null) ? true : !!policy.deviceTamperDetectionEnabled;
+const deviceTamperAlertsEnabled = (policy.deviceTamperAlertsEnabled == null) ? true : !!policy.deviceTamperAlertsEnabled;
+const webCircumventionAlertsEnabled = (policy.webCircumventionAlertsEnabled == null) ? true : !!policy.webCircumventionAlertsEnabled;
+
 const webAllowedDomains = Array.isArray(policy.webAllowedDomains) ? policy.webAllowedDomains : [];
 const webBlockedDomains = Array.isArray(policy.webBlockedDomains) ? policy.webBlockedDomains : [];
 const webAllowedText = webAllowedDomains.join("\n");
@@ -1004,6 +1008,22 @@ webCategoryRules.forEach(r => {
     <div>
       <div class="hint" style="margin-bottom:6px;">Device signals (last heartbeat)</div>
       <div class="card" style="padding:10px;">
+        <div style="font-weight:700;margin-bottom:6px;">Device integrity</div>
+        <label class="check" style="margin-top:6px;">
+          <input id="dev-tamper-detect" type="checkbox" ${deviceTamperDetectionEnabled ? "checked" : ""}/>
+          <span>Detect tamper / enforcement health (best effort)</span>
+        </label>
+        <label class="check" style="margin-top:6px;">
+          <input id="dev-tamper-alerts" type="checkbox" ${deviceTamperAlertsEnabled ? "checked" : ""}/>
+          <span>Surface <strong>tamper</strong> issues in Alerts</span>
+        </label>
+        <label class="check" style="margin-top:6px;">
+          <input id="dev-circ-alerts" type="checkbox" ${webCircumventionAlertsEnabled ? "checked" : ""}/>
+          <span>Surface <strong>circumvention</strong> issues in Alerts</span>
+        </label>
+        <div class="hint" style="margin-top:6px;">Tip: “Surface in Alerts” controls the inbox; the raw heartbeat signals below may still show for troubleshooting.</div>
+        <hr style="margin:10px 0;border:0;border-top:1px solid rgba(255,255,255,0.08);" />
+
         <div>VPN suspected: <strong>${status && status.circumvention ? (status.circumvention.vpnSuspected ? "Yes" : "No") : "—"}</strong></div>
         <div>Proxy enabled: <strong>${status && status.circumvention ? (status.circumvention.proxyEnabled ? "Yes" : "No") : "—"}</strong></div>
         <div>Public DNS detected: <strong>${status && status.circumvention ? (status.circumvention.publicDnsDetected ? "Yes" : "No") : "—"}</strong></div>
@@ -1066,6 +1086,10 @@ webCategoryRules.forEach(r => {
     const webCircEl = document.getElementById("web-circ");
     const webAllowEl = document.getElementById("web-allow-domains");
     const webBlockEl = document.getElementById("web-block-domains");
+
+    const devTamperDetectEl = document.getElementById("dev-tamper-detect");
+    const devTamperAlertsEl = document.getElementById("dev-tamper-alerts");
+    const devCircAlertsEl = document.getElementById("dev-circ-alerts");
 
 
     const pairBtn = document.getElementById("pair-start");
@@ -1429,6 +1453,9 @@ function buildWebCategoryRules(){
         webSafeSearchEnabled: webSafeEl ? !!webSafeEl.checked : false,
         webYouTubeRestrictedModeEnabled: webYouTubeEl ? !!webYouTubeEl.checked : false,
         webCircumventionDetectionEnabled: webCircEl ? !!webCircEl.checked : true,
+        deviceTamperDetectionEnabled: devTamperDetectEl ? !!devTamperDetectEl.checked : true,
+        deviceTamperAlertsEnabled: devTamperAlertsEl ? !!devTamperAlertsEl.checked : true,
+        webCircumventionAlertsEnabled: devCircAlertsEl ? !!devCircAlertsEl.checked : true,
         webAllowedDomains: webAllowEl ? webAllowEl.value.split(/\r?\n/).map(x => normDomain(x)).filter(x => x) : [],
         webBlockedDomains: webBlockEl ? webBlockEl.value.split(/\r?\n/).map(x => normDomain(x)).filter(x => x) : [],
         webCategoryRules: buildWebCategoryRules()

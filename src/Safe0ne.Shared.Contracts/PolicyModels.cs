@@ -94,6 +94,10 @@ public sealed record ChildPolicy(
     string[]? WebBlockedDomains = null,
     bool WebCircumventionDetectionEnabled = true,
     bool WebSafeSearchEnabled = false,
+    // K10+: device integrity (tamper/circumvention) signals + alert routing gates
+    bool DeviceTamperDetectionEnabled = true,
+    bool DeviceTamperAlertsEnabled = true,
+    bool WebCircumventionAlertsEnabled = true,
     // K11: Mobile-only stubs (future)
     bool LocationSharingEnabled = false,
     GeofenceRule[]? Geofences = null,

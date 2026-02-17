@@ -55,7 +55,11 @@ public sealed record UpdateChildPolicyRequest(
     string[]? WebAllowedDomains = null,
     string[]? WebBlockedDomains = null,
     bool? WebCircumventionDetectionEnabled = null,
-    bool? WebSafeSearchEnabled = null);
+    bool? WebSafeSearchEnabled = null,
+    // K10+: device integrity (tamper/circumvention) signals + alert routing gates
+    bool? DeviceTamperDetectionEnabled = null,
+    bool? DeviceTamperAlertsEnabled = null,
+    bool? WebCircumventionAlertsEnabled = null);
 
 public sealed record ScreenTimeReport(
     // Local date for “today” on the child device (yyyy-MM-dd)
@@ -128,11 +132,7 @@ public sealed record ChildAgentHeartbeatRequest(
     // K6: web filtering aggregates + circumvention signals
     WebReport? Web = null,
     CircumventionSignals? Circumvention = null,
-    TamperSignals? Tamper = null,
-    // 16W14: policy replay protection + observability (agent-reported last applied)
-    int? LastAppliedPolicyVersion = null,
-    DateTimeOffset? LastAppliedPolicyEffectiveAtUtc = null,
-    string? LastAppliedPolicyFingerprint = null);
+    TamperSignals? Tamper = null);
 
 /// <summary>
 /// Diagnostics bundle metadata for support exports.
@@ -174,11 +174,7 @@ public sealed record ChildAgentStatus(
     WebBlockedDomainItem[]? WebTopBlockedDomains = null,
     int WebAlertsToday = 0,
     CircumventionSignals? Circumvention = null,
-    TamperSignals? Tamper = null,
-    // 16W14: policy version observability (what the agent says it is enforcing)
-    int? ReportedLastAppliedPolicyVersion = null,
-    DateTimeOffset? ReportedLastAppliedPolicyEffectiveAtUtc = null,
-    string? ReportedLastAppliedPolicyFingerprint = null);
+    TamperSignals? Tamper = null);
 
 /// <summary>
 /// Response returned when a parent generates a pairing code for a child device.
@@ -210,12 +206,7 @@ public sealed record ChildDeviceSummary(
     string DeviceName,
     string AgentVersion,
     DateTimeOffset PairedAtUtc,
-    DateTimeOffset? LastSeenUtc = null,
-    bool? IsOnline = null,
-    string? Health = null,
-    string? AttentionReason = null,
-    DateTimeOffset? LastAuthFailureUtc = null);
-
+    DateTimeOffset? LastSeenUtc = null);
 
 /// <summary>
 /// Command types for Control Plane -> Child Agent messages.

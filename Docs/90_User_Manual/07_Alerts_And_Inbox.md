@@ -8,11 +8,22 @@
 ## Notes
 - If the Alerts self-test is failing due to a script parse error, treat it as a **blocking regression** and fix immediately.
 
-## Activity-backed alerts
-These alerts are derived from the **SSOT activity stream** (local-first) and appear in the Inbox:
 
-- **Geofence enter/exit** events.
-- **Circumvention detected** (VPN/proxy/private DNS / hosts protection failures) — best-effort.
-- **Tamper / integrity issue** (agent not elevated, enforcement errors) — best-effort.
+## Device integrity alerts (tamper / circumvention)
 
-These are **edge-triggered**: they are emitted when a signal transitions from normal → flagged to avoid spamming.
+Safe0ne surfaces two high-signal integrity events:
+
+- **Possible bypass attempt** (circumvention): VPN/proxy/public DNS/hosts protection failures.
+- **Agent health issue** (tamper): agent not running elevated, or enforcement errors.
+
+### Where it shows
+- **Alerts Inbox** → grouped under the child.
+
+### How to control it
+On the child’s **Policy** page, under **Device signals → Device integrity**, you can toggle:
+
+- **Detect tamper / enforcement health**
+- **Surface tamper issues in Alerts**
+- **Surface circumvention issues in Alerts**
+
+If “Surface … in Alerts” is off, these signals are still collected best-effort but will not appear as Alerts Inbox items.

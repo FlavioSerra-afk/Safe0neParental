@@ -37,9 +37,8 @@ Legend:
 | K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | 🟡 | PATCH_16T persists toggles; enforcement TBD. |
 | K-ALERT-001 | Agent | Telemetry → Alerts/Activity pipeline | Win✅ | ✅ | Geofence activity verified; other signals planned. |
 | K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | 🟡 | Planned UX baseline; ensure no-jargon. |
-| K-PAIR-001 | Kid UX/Agent | Pairing: enter code → enroll device token | Win✅ | 🟡 | Kid UX `/pair` + agent enroll persists device token. |
-| K-HEALTH-001 | Agent | Heartbeat / health reporting (authenticated) | Win✅ | ✅ | Heartbeats include device token header once paired; server updates per-device last-seen. |
-| K-ANTITAMPER-001 | Agent | Anti-tamper stubs | Win✅ | 🟡 | Planned; not shipped. |
+| K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Planned; part of pairing/health hardening. |
+| K-ANTITAMPER-001 | Agent | Anti-tamper stubs | Win✅ | 🟡 | Signals reported in heartbeat; parent alerting + policy gates implemented (16W15–16W17). Enforcement hardening still TBD. |
 
 ## Notes
 - WebView2 “Tracking Prevention blocked storage” warnings are expected; **localStorage is best-effort only**.

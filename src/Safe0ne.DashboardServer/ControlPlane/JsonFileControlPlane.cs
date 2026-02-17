@@ -882,21 +882,6 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
     }
 }
 
-public bool ClearPendingPairing(ChildId childId)
-{
-    lock (_gate)
-    {
-        var key = childId.Value.ToString();
-        var removed = _pendingPairingByChildGuid.Remove(key);
-        if (removed)
-        {
-            PersistUnsafe_NoLock();
-        }
-        return removed;
-    }
-}
-
-
 
     public bool TryGetPolicy(ChildId childId, out ChildPolicy policy)
     {
@@ -1160,80 +1145,45 @@ public bool ClearPendingPairing(ChildId childId)
             var circumvention = req.Circumvention;
             var tamper = req.Tamper;
 
-            // 16W16: Promote circumvention/tamper transitions into the SSOT activity stream (privacy-first).
-            // This allows Alerts inbox (Reports) to surface meaningful events without polling raw status deltas.
+            // K10+: Gate device integrity signals and alert activity based on policy.
+            // Defaults are permissive (true) for backward compatibility.
+            var allowCircSignals = (policy?.WebCircumventionDetectionEnabled ?? true);
+            var allowTamperSignals = (policy?.DeviceTamperDetectionEnabled ?? true);
+            var allowCircAlerts = (policy?.WebCircumventionAlertsEnabled ?? true);
+            var allowTamperAlerts = (policy?.DeviceTamperAlertsEnabled ?? true);
+
+            if (!allowCircSignals || !allowCircAlerts) circumvention = null;
+            if (!allowTamperSignals || !allowTamperAlerts) tamper = null;
+
+            // Activity events are edge-triggered on signal transitions to reduce noise.
             try
             {
-                if (_statusByChildGuid.TryGetValue(key, out var prev))
+                var prev = _statusByChildGuid.TryGetValue(key, out var prior) ? prior : null;
+
+                bool prevCirc = prev?.Circumvention is not null && (prev.Circumvention.VpnSuspected || prev.Circumvention.ProxyEnabled || prev.Circumvention.PublicDnsDetected || prev.Circumvention.HostsWriteFailed);
+                bool nowCirc = circumvention is not null && (circumvention.VpnSuspected || circumvention.ProxyEnabled || circumvention.PublicDnsDetected || circumvention.HostsWriteFailed);
+
+                bool prevTamper = prev?.Tamper is not null && (prev.Tamper.NotRunningElevated || prev.Tamper.EnforcementError);
+                bool nowTamper = tamper is not null && (tamper.NotRunningElevated || tamper.EnforcementError);
+
+                var evts = new System.Collections.Generic.List<object>();
+
+                if (allowCircAlerts && nowCirc && !prevCirc)
                 {
-                    // Circumvention: emit when any signal flips false->true.
-                    bool prevCirc = prev.Circumvention is not null && (
-                        prev.Circumvention.VpnSuspected ||
-                        prev.Circumvention.ProxyEnabled ||
-                        prev.Circumvention.PublicDnsDetected ||
-                        prev.Circumvention.HostsWriteFailed);
+                    evts.Add(new { kind = "device_circumvention_detected", occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"), vpnSuspected = circumvention!.VpnSuspected, proxyEnabled = circumvention.ProxyEnabled, publicDnsDetected = circumvention.PublicDnsDetected, hostsWriteFailed = circumvention.HostsWriteFailed });
+                }
+                if (allowTamperAlerts && nowTamper && !prevTamper)
+                {
+                    evts.Add(new { kind = "device_tamper_detected", occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"), notRunningElevated = tamper!.NotRunningElevated, enforcementError = tamper.EnforcementError, lastError = tamper.LastError, lastErrorAtUtc = tamper.LastErrorAtUtc });
+                }
 
-                    bool nowCirc = circumvention is not null && (
-                        circumvention.VpnSuspected ||
-                        circumvention.ProxyEnabled ||
-                        circumvention.PublicDnsDetected ||
-                        circumvention.HostsWriteFailed);
-
-                    if (!prevCirc && nowCirc)
-                    {
-                        var evt = JsonSerializer.Serialize(new[]
-                        {
-                            new
-                            {
-                                kind = "circumvention_detected",
-                                occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"),
-                                details = JsonSerializer.Serialize(new
-                                {
-                                    vpnSuspected = circumvention?.VpnSuspected ?? false,
-                                    proxyEnabled = circumvention?.ProxyEnabled ?? false,
-                                    publicDnsDetected = circumvention?.PublicDnsDetected ?? false,
-                                    hostsWriteFailed = circumvention?.HostsWriteFailed ?? false
-                                }, JsonDefaults.Options)
-                            }
-                        }, JsonDefaults.Options);
-                        AppendLocalActivityJsonUnsafe_NoLock(key, evt);
-                    }
-
-                    // Tamper: emit when any signal flips false->true.
-                    bool prevTamper = prev.Tamper is not null && (
-                        prev.Tamper.NotRunningElevated ||
-                        prev.Tamper.EnforcementError);
-
-                    bool nowTamper = tamper is not null && (
-                        tamper.NotRunningElevated ||
-                        tamper.EnforcementError);
-
-                    if (!prevTamper && nowTamper)
-                    {
-                        var evt = JsonSerializer.Serialize(new[]
-                        {
-                            new
-                            {
-                                kind = "tamper_detected",
-                                occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"),
-                                details = JsonSerializer.Serialize(new
-                                {
-                                    notRunningElevated = tamper?.NotRunningElevated ?? false,
-                                    enforcementError = tamper?.EnforcementError ?? false,
-                                    lastError = tamper?.LastError,
-                                    lastErrorAtUtc = tamper?.LastErrorAtUtc
-                                }, JsonDefaults.Options)
-                            }
-                        }, JsonDefaults.Options);
-                        AppendLocalActivityJsonUnsafe_NoLock(key, evt);
-                    }
+                if (evts.Count > 0)
+                {
+                    var evtJson = JsonSerializer.Serialize(evts, JsonDefaults.Options);
+                    AppendLocalActivityJsonUnsafe_NoLock(childId.Value.ToString(), evtJson);
                 }
             }
-            catch
-            {
-                // Best-effort only.
-            }
-
+            catch { }
 
             var status = new ChildAgentStatus(
                 ChildId: childId,
@@ -1720,6 +1670,12 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
             var webSafe = req.WebSafeSearchEnabled ?? existing.WebSafeSearchEnabled;
 
 
+            // K10+: device integrity signals gates
+            var tamperDetect = req.DeviceTamperDetectionEnabled ?? existing.DeviceTamperDetectionEnabled;
+            var tamperAlerts = req.DeviceTamperAlertsEnabled ?? existing.DeviceTamperAlertsEnabled;
+            var circAlerts = req.WebCircumventionAlertsEnabled ?? existing.WebCircumventionAlertsEnabled;
+
+
             DateTimeOffset? grantUntil = existing.GrantUntilUtc;
             if (req.GrantMinutes is not null)
             {
@@ -1753,7 +1709,10 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
                 WebAllowedDomains = webAllow,
                 WebBlockedDomains = webBlock,
                 WebCircumventionDetectionEnabled = webCirc,
-                WebSafeSearchEnabled = webSafe
+                WebSafeSearchEnabled = webSafe,
+                DeviceTamperDetectionEnabled = tamperDetect,
+                DeviceTamperAlertsEnabled = tamperAlerts,
+                WebCircumventionAlertsEnabled = circAlerts
             };
 
             _policiesByChildGuid[key] = updated;
