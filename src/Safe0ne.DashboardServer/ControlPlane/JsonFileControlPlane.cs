@@ -1160,69 +1160,80 @@ public bool ClearPendingPairing(ChildId childId)
             var circumvention = req.Circumvention;
             var tamper = req.Tamper;
 
-            // 16W15: Emit local activity events for tamper / circumvention signals (rising edge only).
-            _statusByChildGuid.TryGetValue(key, out var prevStatus);
-            var events = new List<object>();
-
-            var nowEventUtc = DateTimeOffset.UtcNow;
-
-            // Tamper
-            var prevNotElevated = prevStatus?.Tamper?.NotRunningElevated ?? false;
-            if (tamper?.NotRunningElevated == true && !prevNotElevated)
+            // 16W16: Promote circumvention/tamper transitions into the SSOT activity stream (privacy-first).
+            // This allows Alerts inbox (Reports) to surface meaningful events without polling raw status deltas.
+            try
             {
-                events.Add(new
+                if (_statusByChildGuid.TryGetValue(key, out var prev))
                 {
-                    kind = TamperActivityEventKinds.AgentNotElevated,
-                    occurredAtUtc = nowEventUtc,
-                    severity = "Warning",
-                    details = "Agent is not running elevated; enforcement may be degraded."
-                });
-            }
+                    // Circumvention: emit when any signal flips false->true.
+                    bool prevCirc = prev.Circumvention is not null && (
+                        prev.Circumvention.VpnSuspected ||
+                        prev.Circumvention.ProxyEnabled ||
+                        prev.Circumvention.PublicDnsDetected ||
+                        prev.Circumvention.HostsWriteFailed);
 
-            var prevEnforcementErr = prevStatus?.Tamper?.EnforcementError ?? false;
-            if (tamper?.EnforcementError == true && !prevEnforcementErr)
-            {
-                events.Add(new
-                {
-                    kind = TamperActivityEventKinds.AgentEnforcementError,
-                    occurredAtUtc = nowEventUtc,
-                    severity = "Warning",
-                    details = tamper.LastError ?? "Agent enforcement error (recent)."
-                });
-            }
+                    bool nowCirc = circumvention is not null && (
+                        circumvention.VpnSuspected ||
+                        circumvention.ProxyEnabled ||
+                        circumvention.PublicDnsDetected ||
+                        circumvention.HostsWriteFailed);
 
-            // Circumvention (best-effort)
-            var circ = circumvention;
-            var prevCirc = prevStatus?.Circumvention;
-            if (circ?.VpnSuspected == true && (prevCirc?.VpnSuspected ?? false) == false)
-            {
-                events.Add(new { kind = TamperActivityEventKinds.CircumventionVpnSuspected, occurredAtUtc = nowEventUtc, severity = "Info", details = "VPN suspected." });
-            }
-            if (circ?.ProxyEnabled == true && (prevCirc?.ProxyEnabled ?? false) == false)
-            {
-                events.Add(new { kind = TamperActivityEventKinds.CircumventionProxyEnabled, occurredAtUtc = nowEventUtc, severity = "Info", details = "Proxy appears enabled." });
-            }
-            if (circ?.PublicDnsDetected == true && (prevCirc?.PublicDnsDetected ?? false) == false)
-            {
-                events.Add(new { kind = TamperActivityEventKinds.CircumventionPublicDnsDetected, occurredAtUtc = nowEventUtc, severity = "Info", details = "Public DNS detected." });
-            }
-            if (circ?.HostsWriteFailed == true && (prevCirc?.HostsWriteFailed ?? false) == false)
-            {
-                events.Add(new { kind = TamperActivityEventKinds.CircumventionHostsWriteFailed, occurredAtUtc = nowEventUtc, severity = "Warning", details = "Hosts file write failed." });
-            }
+                    if (!prevCirc && nowCirc)
+                    {
+                        var evt = JsonSerializer.Serialize(new[]
+                        {
+                            new
+                            {
+                                kind = "circumvention_detected",
+                                occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                                details = JsonSerializer.Serialize(new
+                                {
+                                    vpnSuspected = circumvention?.VpnSuspected ?? false,
+                                    proxyEnabled = circumvention?.ProxyEnabled ?? false,
+                                    publicDnsDetected = circumvention?.PublicDnsDetected ?? false,
+                                    hostsWriteFailed = circumvention?.HostsWriteFailed ?? false
+                                }, JsonDefaults.Options)
+                            }
+                        }, JsonDefaults.Options);
+                        AppendLocalActivityJsonUnsafe_NoLock(key, evt);
+                    }
 
-            if (events.Count > 0)
-            {
-                try
-                {
-                    var json = JsonSerializer.Serialize(events, JsonDefaults.Options);
-                    AppendLocalActivityJsonUnsafe_NoLock(key, json);
+                    // Tamper: emit when any signal flips false->true.
+                    bool prevTamper = prev.Tamper is not null && (
+                        prev.Tamper.NotRunningElevated ||
+                        prev.Tamper.EnforcementError);
+
+                    bool nowTamper = tamper is not null && (
+                        tamper.NotRunningElevated ||
+                        tamper.EnforcementError);
+
+                    if (!prevTamper && nowTamper)
+                    {
+                        var evt = JsonSerializer.Serialize(new[]
+                        {
+                            new
+                            {
+                                kind = "tamper_detected",
+                                occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                                details = JsonSerializer.Serialize(new
+                                {
+                                    notRunningElevated = tamper?.NotRunningElevated ?? false,
+                                    enforcementError = tamper?.EnforcementError ?? false,
+                                    lastError = tamper?.LastError,
+                                    lastErrorAtUtc = tamper?.LastErrorAtUtc
+                                }, JsonDefaults.Options)
+                            }
+                        }, JsonDefaults.Options);
+                        AppendLocalActivityJsonUnsafe_NoLock(key, evt);
+                    }
                 }
-                catch
-                {
-                    // Ignore activity emission failures.
-                }
             }
+            catch
+            {
+                // Best-effort only.
+            }
+
 
             var status = new ChildAgentStatus(
                 ChildId: childId,
@@ -1246,10 +1257,7 @@ public bool ClearPendingPairing(ChildId childId)
                 WebTopBlockedDomains: webTopBlocked,
                 WebAlertsToday: webAlerts,
                 Circumvention: circumvention,
-                Tamper: tamper,
-                ReportedLastAppliedPolicyVersion: req.LastAppliedPolicyVersion,
-                ReportedLastAppliedPolicyEffectiveAtUtc: req.LastAppliedPolicyEffectiveAtUtc,
-                ReportedLastAppliedPolicyFingerprint: req.LastAppliedPolicyFingerprint);
+                Tamper: tamper);
 
             _statusByChildGuid[key] = status;
 

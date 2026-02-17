@@ -245,37 +245,100 @@
       const events = (res && res.ok && Array.isArray(res.data)) ? res.data : [];
       for (const ev of events){
         const kind = String(ev && ev.kind ? ev.kind : "");
-        if (kind !== "geofence_enter" && kind !== "geofence_exit") continue;
+        if (kind !== "geofence_enter" && kind !== "geofence_exit" && kind !== "circumvention_detected" && kind !== "tamper_detected") continue;
 
         const occurredAtUtc = String(ev && ev.occurredAtUtc ? ev.occurredAtUtc : "");
         const t = Date.parse(occurredAtUtc);
         if (!Number.isNaN(t) && (now - t) > horizonMs) continue;
 
         const details = safeJsonParse(ev && ev.details);
-        const gfId = details && (details.geofenceId || details.id) ? String(details.geofenceId || details.id) : "";
-        const name = details && details.name ? String(details.name) : (gfId || "Geofence");
-        const mode = details && details.mode ? String(details.mode) : "inside";
-
-        // Collapse to the latest transition per (child, geofence, kind) to avoid spamming the inbox.
-        const dedupeKey = `${childId}|${gfId}|${kind}`;
-        const prev = seen.get(dedupeKey);
-        if (prev && occurredAtUtc && Date.parse(prev) >= t) continue;
-        seen.set(dedupeKey, occurredAtUtc);
 
         const childName = (c && c.displayName) ? String(c.displayName) : "Child";
-        const entered = kind === "geofence_enter";
-        const verb = entered ? "Entered" : "Left";
-        const title = `Geofence: ${verb} ${name}`;
 
-        alerts.push({
-          sev: "info",
-          childId,
-          childName,
-          title,
-          detail: `${childName} ${entered ? "entered" : "left"} “${name}”. Rule: ${mode === "outside" ? "Outside" : "Inside"}.`,
-          when: occurredAtUtc ? fmtWhen(occurredAtUtc) : "",
-          occurredAtUtc: occurredAtUtc || ""
-        });
+        if (kind === "geofence_enter" || kind === "geofence_exit"){
+          const gfId = details && (details.geofenceId || details.id) ? String(details.geofenceId || details.id) : "";
+          const name = details && details.name ? String(details.name) : (gfId || "Geofence");
+          const mode = details && details.mode ? String(details.mode) : "inside";
+
+          // Collapse to the latest transition per (child, geofence, kind) to avoid spamming the inbox.
+          const dedupeKey = `${childId}|${gfId}|${kind}`;
+          const prev = seen.get(dedupeKey);
+          if (prev && occurredAtUtc && Date.parse(prev) >= t) continue;
+          seen.set(dedupeKey, occurredAtUtc);
+
+          const entered = kind === "geofence_enter";
+          const verb = entered ? "Entered" : "Left";
+          const title = `Geofence: ${verb} ${name}`;
+
+          alerts.push({
+            sev: "info",
+            childId,
+            childName,
+            title,
+            detail: `${childName} ${entered ? "entered" : "left"} “${name}”. Rule: ${mode === "outside" ? "Outside" : "Inside"}.`,
+            when: occurredAtUtc ? fmtWhen(occurredAtUtc) : "",
+            occurredAtUtc: occurredAtUtc || ""
+          });
+          continue;
+        }
+
+        if (kind === "circumvention_detected"){
+          // De-dupe: only latest per child within horizon
+          const dedupeKey = `${childId}|circumvention_detected`;
+          const prev = seen.get(dedupeKey);
+          if (prev && occurredAtUtc && Date.parse(prev) >= t) continue;
+          seen.set(dedupeKey, occurredAtUtc);
+
+          const parts = [];
+          try{
+            if (details && details.vpnSuspected) parts.push("VPN suspected");
+            if (details && details.proxyEnabled) parts.push("Proxy enabled");
+            if (details && details.publicDnsDetected) parts.push("Public DNS detected");
+            if (details && details.hostsWriteFailed) parts.push("Hosts protection failed");
+          }catch{}
+          const title = "Circumvention detected";
+          const msg = parts.length ? parts.join(", ") : "Network circumvention signals were detected.";
+
+          alerts.push({
+            sev: "warning",
+            childId,
+            childName,
+            title,
+            detail: `${childName}: ${msg}`,
+            when: occurredAtUtc ? fmtWhen(occurredAtUtc) : "",
+            occurredAtUtc: occurredAtUtc || ""
+          });
+          continue;
+        }
+
+        if (kind === "tamper_detected"){
+          const dedupeKey = `${childId}|tamper_detected`;
+          const prev = seen.get(dedupeKey);
+          if (prev && occurredAtUtc && Date.parse(prev) >= t) continue;
+          seen.set(dedupeKey, occurredAtUtc);
+
+          const parts = [];
+          try{
+            if (details && details.notRunningElevated) parts.push("Agent not elevated");
+            if (details && details.enforcementError) parts.push("Enforcement error");
+          }catch{}
+          const title = "Tamper / integrity issue";
+          let msg = parts.length ? parts.join(", ") : "Integrity signals were detected.";
+          try{
+            if (details && details.lastError) msg += `. Last error: ${String(details.lastError)}`;
+          }catch{}
+
+          alerts.push({
+            sev: "danger",
+            childId,
+            childName,
+            title,
+            detail: `${childName}: ${msg}`,
+            when: occurredAtUtc ? fmtWhen(occurredAtUtc) : "",
+            occurredAtUtc: occurredAtUtc || ""
+          });
+          continue;
+        }
       }
     }
 
