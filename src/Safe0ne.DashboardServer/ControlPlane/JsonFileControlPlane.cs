@@ -2059,6 +2059,8 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
 
         return TimeSpan.FromDays(30);
     
+    }
+
 
     private static TimeSpan GetPolicyWatchdogThreshold()
     {
@@ -2088,7 +2090,6 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         }
         return TimeSpan.FromMinutes(10);
     }
-}
 
     private static string ComputeSha256Hex(string input)
     {
