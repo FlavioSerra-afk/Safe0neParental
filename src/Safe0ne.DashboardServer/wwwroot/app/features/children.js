@@ -534,25 +534,36 @@ function renderDevicesTab(child) {
   const fallback = Array.isArray(fallbackProf.devices) ? fallbackProf.devices : [];
   const devices = Array.isArray(apiDevices) ? apiDevices : (fallback.length ? fallback : []);
 
+  const counts = (Array.isArray(devices) ? devices : []).reduce((acc,d)=>{
+    const isOnline = (typeof d?.isOnline === "boolean") ? d.isOnline : (d?.lastSeenUtc ? ((Date.now() - new Date(d.lastSeenUtc).getTime()) < (3*60*1000)) : false);
+    const attention = (d && typeof d.attentionReason === "string" && d.attentionReason.trim()) ? true : false;
+    acc.total++;
+    if (attention) acc.attention++;
+    if (isOnline) acc.online++; else acc.offline++;
+    return acc;
+  }, {total:0, online:0, offline:0, attention:0});
+
   const rows = (devices.length ? devices : [{ deviceName: "No devices", status: "Not enrolled", lastSeenUtc: null }])
     .map((d) => {
       const devId = String(d?.deviceId ?? d?.id ?? "");
       const name = String(d?.deviceName ?? d?.name ?? "Device");
-      const lastSeenDt = d?.lastSeenUtc ? new Date(d.lastSeenUtc) : null;
-      const lastSeen = lastSeenDt ? lastSeenDt.toLocaleString() : (d?.lastSeen || "—");
-      const online = !!(lastSeenDt && (Date.now() - lastSeenDt.getTime()) < (3 * 60 * 1000));
-      const status = String(d?.status ?? (devId ? (online ? "Online" : "Offline") : "Not paired"));
-      const ver = String(d?.agentVersion || "");
-      const canUnpair = useApi && devId;
-      return `
-    <div class="tr">
-      <div><strong>${escapeHtml(name)}</strong></div>
-      <div><span class="so-pill">${escapeHtml(status)}</span></div>
-      <div class="so-card-sub">${escapeHtml(lastSeen)}${ver ? ` • v${escapeHtml(ver)}` : ""}</div>
-      <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
-        ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
-      </div>
-    </div>`;
+  const lastSeenDt = d?.lastSeenUtc ? new Date(d.lastSeenUtc) : null;
+  const lastSeen = lastSeenDt ? lastSeenDt.toLocaleString() : (d?.lastSeen || "—");
+  const isOnline = (typeof d?.isOnline === "boolean") ? d.isOnline : !!(lastSeenDt && (Date.now() - lastSeenDt.getTime()) < (3 * 60 * 1000));
+  const attentionReason = (d && typeof d.attentionReason === "string" && d.attentionReason.trim()) ? d.attentionReason.trim() : null;
+  const health = (d && typeof d.health === "string" && d.health.trim()) ? d.health.trim() : (attentionReason ? "Attention" : (isOnline ? "Online" : "Offline"));
+  const status = String(d?.status ?? health);
+  const ver = String(d?.agentVersion || "");
+  const canUnpair = useApi && devId;
+  return `
+<div class="tr">
+  <div><strong>${escapeHtml(name)}</strong></div>
+  <div><span class="so-pill">${escapeHtml(status)}</span></div>
+  <div class="so-card-sub">${escapeHtml(lastSeen)}${ver ? ` • v${escapeHtml(ver)}` : ""}${attentionReason ? ` • <span style="font-weight:800;">${escapeHtml(attentionReason)}</span>` : ""}</div>
+  <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+    ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
+  </div>
+</div>`;
     })
     .join("");
 
@@ -586,6 +597,11 @@ function renderDevicesTab(child) {
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
         <div style="font-weight:900;font-size:18px;">Devices</div>
         <div class="so-card-sub">Local enrollment (Parent ↔ Kid)</div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="so-pill">Online ${counts.online}</span>
+        <span class="so-pill">Offline ${counts.offline}</span>
+        <span class="so-pill">Needs attention ${counts.attention}</span>
       </div>
       ${pairActions}
       ${pairingBlock}

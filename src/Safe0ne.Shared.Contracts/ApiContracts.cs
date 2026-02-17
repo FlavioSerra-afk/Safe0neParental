@@ -202,7 +202,12 @@ public sealed record ChildDeviceSummary(
     string DeviceName,
     string AgentVersion,
     DateTimeOffset PairedAtUtc,
-    DateTimeOffset? LastSeenUtc = null);
+    DateTimeOffset? LastSeenUtc = null,
+    bool? IsOnline = null,
+    string? Health = null,
+    string? AttentionReason = null,
+    DateTimeOffset? LastAuthFailureUtc = null);
+
 
 /// <summary>
 /// Command types for Control Plane -> Child Agent messages.

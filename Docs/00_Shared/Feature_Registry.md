@@ -55,3 +55,7 @@ This document is the **single source of truth** for tracking feature delivery st
 2. Update **Status** + **Evidence**.
 3. Update the matching **User Manual** section under `Docs/90_User_Manual/`.
 4. Ensure marker/self-tests remain green.
+
+
+### Shipped patches (append-only)
+- ✅ 16W12 Device health hardening (reasons, badges, online/offline transitions → activity)

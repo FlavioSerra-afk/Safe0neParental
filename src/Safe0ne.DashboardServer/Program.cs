@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
+using Safe0ne.DashboardServer.Reports;
+using Safe0ne.DashboardServer.Devices;
 using Safe0ne.Shared.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +20,10 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
+
+// Background services (local-first)
+builder.Services.AddHostedService<ReportSchedulerService>();
+builder.Services.AddHostedService<DeviceHealthSweepService>();
 
 var app = builder.Build();
 
@@ -227,6 +233,8 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/heartbeat", async 
     {
         if (!TryGetDeviceToken(req, out var token) || !cp.TryValidateDeviceToken(id, token, out var did))
         {
+            // 16W12: record auth failures for device health attention (best-effort).
+            cp.RecordDeviceAuthFailure(id, DateTimeOffset.UtcNow);
             return Results.Unauthorized();
         }
         authenticated = true;
@@ -329,6 +337,8 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/commands/{{command
     {
         if (!TryGetDeviceToken(req, out var token) || !cp.TryValidateDeviceToken(id, token, out var did))
         {
+            // 16W12: record auth failures for device health attention (best-effort).
+            cp.RecordDeviceAuthFailure(id, DateTimeOffset.UtcNow);
             return Results.Unauthorized();
         }
         deviceId = did;
