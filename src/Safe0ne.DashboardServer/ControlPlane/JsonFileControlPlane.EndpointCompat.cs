@@ -1,0 +1,140 @@
+using System.Text.Json.Nodes;
+using Safe0ne.Shared.Contracts;
+
+namespace Safe0ne.DashboardServer.ControlPlane;
+
+// Endpoint-facing compatibility helpers.
+// These methods exist so Program.cs can call stable names even as we split JsonFileControlPlane into domain partials.
+public sealed partial class JsonFileControlPlane
+{
+    /// <summary>
+    /// Revoke a paired device token by removing the paired device entry.
+    /// Returns true if the operation executed; 'revoked' indicates whether a device was actually removed.
+    /// </summary>
+    public bool TryRevokeDeviceToken(Guid deviceId, out bool revoked, out string? error)
+    {
+        lock (_gate)
+        {
+            revoked = false;
+            error = null;
+
+            try
+            {
+                if (_devicesByChildGuid.Count == 0)
+                {
+                    return true;
+                }
+
+                foreach (var kvp in _devicesByChildGuid.ToList())
+                {
+                    var devices = kvp.Value;
+                    if (devices is null || devices.Count == 0) continue;
+
+                    var idx = devices.FindIndex(d => d.DeviceId == deviceId);
+                    if (idx >= 0)
+                    {
+                        devices.RemoveAt(idx);
+                        revoked = true;
+
+                        // Clean empty lists to keep snapshots tidy.
+                        if (devices.Count == 0)
+                        {
+                            _devicesByChildGuid.Remove(kvp.Key);
+                        }
+
+                        PersistUnsafe_NoLock();
+                        return true;
+                    }
+                }
+
+                // Not found is not an error; caller decides how to surface.
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Overload that accepts childId for API routing convenience; deviceId is still the primary key.
+    /// </summary>
+    public bool TryRevokeDeviceToken(Guid childId, Guid deviceId, out bool revoked, out string? error)
+    {
+        // childId is advisory; we still search defensively to avoid SSOT drift.
+        return TryRevokeDeviceToken(deviceId, out revoked, out error);
+    }
+
+    /// <summary>
+    /// Attempts to roll back the local settings profile JSON to a last-known-good snapshot if the current profile embeds one.
+    /// This is deliberately conservative and additive: if no embedded LKG exists, it reports 'rolledBack=false'.
+    /// </summary>
+    public bool TryRollbackPolicyToLastKnownGood(Guid childId, out bool rolledBack, out string? error)
+    {
+        lock (_gate)
+        {
+            rolledBack = false;
+            error = null;
+
+            try
+            {
+                var key = childId.ToString();
+                if (!_localSettingsProfileJsonByChildGuid.TryGetValue(key, out var current) || string.IsNullOrWhiteSpace(current))
+                {
+                    error = "no_settings_profile";
+                    return true;
+                }
+
+                JsonNode? node = null;
+                try
+                {
+                    node = JsonNode.Parse(current);
+                }
+                catch
+                {
+                    // If profile isn't parseable, we can't safely discover embedded LKG.
+                    error = "settings_profile_invalid_json";
+                    return true;
+                }
+
+                if (node is not JsonObject obj)
+                {
+                    error = "settings_profile_not_object";
+                    return true;
+                }
+
+                // We look for a small set of known/anticipated fields used by policy watchdog/rollback work.
+                // If present, these store the last-known-good profile JSON as a string.
+                string? lkg =
+                    obj["lastKnownGoodProfileJson"]?.GetValue<string?>()
+                    ?? obj["lastKnownGoodJson"]?.GetValue<string?>()
+                    ?? obj["policyLastKnownGoodJson"]?.GetValue<string?>();
+
+                if (string.IsNullOrWhiteSpace(lkg))
+                {
+                    error = "no_last_known_good";
+                    return true;
+                }
+
+                _localSettingsProfileJsonByChildGuid[key] = lkg!;
+                PersistUnsafe_NoLock();
+
+                rolledBack = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Convenience overload for ChildId value object.
+    /// </summary>
+    public bool TryRollbackPolicyToLastKnownGood(ChildId childId, out bool rolledBack, out string? error)
+        => TryRollbackPolicyToLastKnownGood(childId.Value, out rolledBack, out error);
+}
