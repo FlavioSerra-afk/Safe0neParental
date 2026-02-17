@@ -475,7 +475,7 @@ app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Gui
 });
 
 // 16W23: server-guided rollback to last-known-good policy snapshot.
-app.MapPost( /api/{ApiVersions.V1}/children/{childId:guid}/policy/rollback-last-known-good", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
+app.MapPost($"/api/{ApiVersions.V1}/children/{childId:guid}/policy/rollback-last-known-good", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
     string? updatedBy = null;
