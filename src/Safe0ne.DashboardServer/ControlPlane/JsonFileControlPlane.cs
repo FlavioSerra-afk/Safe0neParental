@@ -1903,7 +1903,9 @@ public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? updatedBy,
             hist2 = new List<ChildPolicy>();
             _policyHistoryByChildGuid[key] = hist2;
         }
-        hist2.RemoveAll(p => p.Version.Value == rolledBack.Version.Value);
+	    // Avoid capturing out parameter in a lambda (CS1628).
+	    var rolledBackVersion = rolledBack.Version.Value;
+	    hist2.RemoveAll(p => p.Version.Value == rolledBackVersion);
         hist2.Add(rolledBack);
         hist2.Sort((a,b) => a.Version.Value.CompareTo(b.Version.Value));
         if (hist2.Count > 20)
