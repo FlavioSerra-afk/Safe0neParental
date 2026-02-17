@@ -1185,7 +1185,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var appliedPolicyVersion = lastAppliedPolicyVersion;
 
             var policyPending = appliedPolicyVersion is null || appliedPolicyVersion.Value < desiredPolicyVersion;
-            var pendingSince = policyPending ? (priorStatus?.PolicyApplyPendingSinceUtc ?? now) : null;
+            var pendingSince = policyPending ? (DateTimeOffset?)(priorStatus?.PolicyApplyPendingSinceUtc ?? now) : null;
             var overdue = policyPending && pendingSince is not null && (now - pendingSince.Value) >= GetPolicyWatchdogThreshold();
 
             var failedRecent = lastPolicyApplyFailedAtUtc is not null && (now - lastPolicyApplyFailedAtUtc.Value) < TimeSpan.FromMinutes(30);
