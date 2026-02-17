@@ -1182,7 +1182,10 @@ public bool ClearPendingPairing(ChildId childId)
                 WebTopBlockedDomains: webTopBlocked,
                 WebAlertsToday: webAlerts,
                 Circumvention: circumvention,
-                Tamper: tamper);
+                Tamper: tamper,
+                ReportedLastAppliedPolicyVersion: req.LastAppliedPolicyVersion,
+                ReportedLastAppliedPolicyEffectiveAtUtc: req.LastAppliedPolicyEffectiveAtUtc,
+                ReportedLastAppliedPolicyFingerprint: req.LastAppliedPolicyFingerprint);
 
             _statusByChildGuid[key] = status;
 

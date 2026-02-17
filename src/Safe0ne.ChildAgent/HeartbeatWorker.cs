@@ -164,6 +164,32 @@ if (auth?.DeviceToken is not null)
                         policySurface = pol;
                 }
 
+
+                // 16W14: replay protection. Ignore older policy versions than what we already applied.
+                // This prevents a stale local server state (or a reboot) from rolling the kid back to an older policy.
+                if (policyVersion is not null && lastAppliedPolicyVersion is not null && policyVersion.Value < lastAppliedPolicyVersion.Value)
+                {
+                    var incoming = policyVersion;
+
+                    // Treat as unavailable so we fall back to cache/legacy.
+                    policySurface = null;
+                    policyEffectiveAtUtc = null;
+                    policyVersion = null;
+
+                    try
+                    {
+                        activityOutbox ??= new ActivityOutbox(childId);
+                        activityOutbox.Enqueue(new ActivityOutbox.LocalActivityEvent(
+                            EventId: Guid.NewGuid(),
+                            OccurredAtUtc: DateTimeOffset.UtcNow,
+                            Kind: "policy_replay_ignored",
+                            App: null,
+                            Details: JsonSerializer.Serialize(new { incomingVersion = incoming, lastAppliedVersion = lastAppliedPolicyVersion, note = "Ignored policy replay (older version)" }, JsonDefaults.Options),
+                            DeviceId: auth?.DeviceId.ToString()));
+                    }
+                    catch { }
+                }
+
 	                // 16X: Offline-first guardrail.
 	                // Load last cached policy once (best-effort) so we can keep enforcing if the local server is unavailable.
 	                var cached = PolicyCacheStore.Load(childId);
@@ -584,7 +610,10 @@ if (auth?.DeviceToken is not null)
                     Apps: appTracker.BuildReport(),
                     Web: webReport,
                     Circumvention: circ,
-                    Tamper: tamper);
+                    Tamper: tamper,
+					LastAppliedPolicyVersion: lastAppliedPolicyVersion,
+					LastAppliedPolicyEffectiveAtUtc: lastAppliedPolicyEffectiveAtUtc,
+					LastAppliedPolicyFingerprint: lastAppliedPolicyFingerprint);
 
                 using var resp = await client.PostAsJsonAsync(
                     $"/api/{ApiVersions.V1}/children/{childId.Value}/heartbeat",

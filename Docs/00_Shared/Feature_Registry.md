@@ -59,3 +59,12 @@ This document is the **single source of truth** for tracking feature delivery st
 
 ### Shipped patches (append-only)
 - ✅ 16W12 Device health hardening (reasons, badges, online/offline transitions → activity)
+
+
+## 16W14 — Policy Versioning + Kid Replay Guard + Heartbeat Observability
+
+- **Status:** 🟡 Partial (scaffolded)
+- **Why:** Prevent the Kid from rolling back to an older policy after restarts; allow Parent UI to see what policy the agent says it is enforcing.
+- **SSOT:** `JsonFileControlPlane` policyVersion in Local Settings Profile.
+- **Agent:** caches last-known-good policy and ignores older policy versions (replay).
+- **Telemetry:** agent reports `LastAppliedPolicyVersion` / `EffectiveAtUtc` / fingerprint via heartbeat; server stores on `ChildAgentStatus`.
