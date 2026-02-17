@@ -5,7 +5,6 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Safe0ne.Shared.Contracts;
 using Safe0ne.ChildAgent.Requests;
-using Safe0ne.ChildAgent.Pairing;
 
 namespace Safe0ne.ChildAgent.ChildUx;
 
@@ -19,18 +18,16 @@ public sealed class ChildUxServer
     private readonly ChildStateStore _store;
     private readonly ILogger _logger;
     private readonly AccessRequestQueue _requests;
-    private readonly EnrollmentService _enroll;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
     // Keep this separate from the Control Plane (8765) and web block server (80/8766).
     private const int Port = 8771;
 
-    public ChildUxServer(ChildStateStore store, AccessRequestQueue requests, EnrollmentService enroll, ILogger<ChildUxServer> logger)
+    public ChildUxServer(ChildStateStore store, AccessRequestQueue requests, ILogger<ChildUxServer> logger)
     {
         _store = store;
         _requests = requests;
-        _enroll = enroll;
         _logger = logger;
     }
 
@@ -203,20 +200,7 @@ public sealed class ChildUxServer
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Screen time</h2><div><b>Remaining:</b> {WebUtility.HtmlEncode(limitLabel)}</div><div class='muted'><b>Used:</b> {WebUtility.HtmlEncode(usedLabel)}</div>");
-        
-        // Pairing helper: if not enrolled, offer link to pairing page.
-        var childId = AgentAuthStore.LoadCurrentChildId();
-        var hasAuth = childId.HasValue && AgentAuthStore.LoadAuth(childId.Value) is not null;
-        if (!hasAuth)
-        {
-            sb.Append("<div class='muted' style='margin-top:10px'>This device is not paired yet.</div>");
-            sb.Append("<div style='margin-top:8px'><a href='/pair'>Enter pairing code</a></div>");
-        }
-        else
-        {
-            sb.Append("<div class='muted' style='margin-top:10px'>Device is paired.</div>");
-        }
-sb.Append("</div>");
+        sb.Append("</div>");
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Status</h2><div><b>Mode:</b> {WebUtility.HtmlEncode(mode)}</div><div><b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}</div>");
@@ -376,57 +360,6 @@ sb.Append("</div>");
         sb.Append("</div></body></html>");
         return sb.ToString();
     }
-
-
-
-private string RenderPair(string query)
-{
-    var sb = new StringBuilder();
-    sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Pair device</title>");
-    sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .card{max-width:680px;border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} input{width:100%;max-width:420px;padding:10px;border:1px solid #ddd;border-radius:10px;} button{padding:10px 14px;border:1px solid #ddd;border-radius:12px;background:#fff;cursor:pointer;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;}</style>");
-    sb.Append("</head><body><div class='card'>");
-    sb.Append("<h1 style='margin:0 0 8px 0'>Pair this device</h1>");
-    sb.Append("<div class='muted'>Enter the pairing code shown in the Parent app. This is a local page on this device.</div>");
-    sb.Append("<form method='get' action='/pair/complete' style='margin-top:14px'>");
-    sb.Append("<div class='muted' style='margin-bottom:6px'>Pairing code</div>");
-    sb.Append("<input name='code' placeholder='eg. ABCD-1234' autocomplete='one-time-code'/>");
-    sb.Append("<div class='muted' style='margin:12px 0 6px 0'>Device name (optional)</div>");
-    sb.Append($"<input name='name' value='{WebUtility.HtmlEncode(Environment.MachineName)}'/>");
-    sb.Append("<div style='margin-top:14px'><button type='submit'>Pair</button></div>");
-    sb.Append("</form>");
-    sb.Append($"<div style='margin-top:14px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>Back to Today</a></div>");
-    sb.Append("</div></body></html>");
-    return sb.ToString();
-}
-
-private string HandlePair(string query)
-{
-    var q = ParseQuery(query);
-    q.TryGetValue("code", out var code);
-    q.TryGetValue("name", out var name);
-
-    if (string.IsNullOrWhiteSpace(code))
-    {
-        return RenderSimpleMessage("Pair device", "Missing pairing code.", "/pair", "Back");
-    }
-
-    try
-    {
-        var result = _enroll.EnrollByCodeAsync(code.Trim(), name, agentVersion: null, CancellationToken.None)
-            .GetAwaiter().GetResult();
-
-        if (!result.Ok)
-        {
-            return RenderSimpleMessage("Pair device", $"Pairing failed: {result.Message}", "/pair", "Try again");
-        }
-
-        return RenderSimpleMessage("Paired", "This device is now paired. You can return to Today.", "/today", "Go to Today");
-    }
-    catch
-    {
-        return RenderSimpleMessage("Pair device", "Pairing failed due to an unexpected error.", "/pair", "Try again");
-    }
-}
 
     private string HandleRequest(string query)
     {
@@ -636,4 +569,72 @@ private string HandlePair(string query)
         }
         return dict;
     }
+
+
+private static string NormalizePairingCode(string? raw)
+{
+    if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+    var digits = new string(raw.Where(char.IsDigit).ToArray());
+    return digits;
+}
+
+private string RenderPair(string query)
+{
+    var sb = new StringBuilder();
+    sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Pair device</title>");
+    sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .card{max-width:720px;border:1px solid #ddd;border-radius:14px;padding:16px;} .muted{color:#666;} input{width:100%;max-width:520px;padding:10px;border:1px solid #ddd;border-radius:10px;} button{padding:10px 14px;border:1px solid #ddd;border-radius:12px;background:#fff;cursor:pointer;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .ok{background:#ecfdf5;border:1px solid #10b98133;border-radius:12px;padding:10px 12px;margin-bottom:12px;} .warn{background:#fffbeb;border:1px solid #f59e0b33;border-radius:12px;padding:10px 12px;margin-bottom:12px;}</style>");
+    sb.Append("</head><body><div class='card'>");
+    sb.Append("<h1 style='margin:0 0 8px 0'>Pair this device</h1>");
+    sb.Append("<div class='muted'>Enter the pairing code shown in the Parent app. This page runs locally on this device (loopback).</div>");
+    sb.Append("<div class='muted' style='margin-top:10px'>Codes are 6 digits. You can paste with or without spaces/dashes.</div>");
+
+    var current = AgentAuthStore.LoadCurrentChildId();
+    if (current.HasValue)
+    {
+        sb.Append($"<div class='ok'><strong>Already paired</strong><div class='muted'>ChildId: {WebUtility.HtmlEncode(current.Value.Value.ToString())}</div></div>");
+    }
+    else
+    {
+        sb.Append("<div class='warn'><strong>Not paired yet</strong><div class='muted'>After you submit the code, the agent will attempt pairing on its next heartbeat.</div></div>");
+    }
+
+    sb.Append("<form method='get' action='/pair/complete' style='margin-top:14px'>");
+    sb.Append("<div class='muted' style='margin-bottom:6px'>Pairing code</div>");
+    sb.Append("<input name='code' placeholder='eg. 123456' autocomplete='one-time-code' maxlength='16'/>");
+    sb.Append("<div class='muted' style='margin:12px 0 6px 0'>Device name (optional)</div>");
+    sb.Append($"<input name='name' value='{WebUtility.HtmlEncode(Environment.MachineName)}'/>");
+    sb.Append("<div style='margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;'>");
+    sb.Append("<button type='submit'>Save code</button>");
+    sb.Append($"<a href='{WebUtility.HtmlEncode(BaseUrl)}today' style='align-self:center'>Back to Today</a>");
+    sb.Append("</div>");
+    sb.Append("</form>");
+    sb.Append("</div></body></html>");
+    return sb.ToString();
+}
+
+private string HandlePair(string query)
+{
+    var q = ParseQuery(query);
+    q.TryGetValue("code", out var raw);
+    q.TryGetValue("name", out var name);
+
+    var code = NormalizePairingCode(raw);
+
+    if (string.IsNullOrWhiteSpace(code) || code.Length < 6)
+    {
+        return RenderSimpleMessage("Pair device", "Pairing code looks invalid. Please enter the 6-digit code from the Parent app.", "/pair", "Try again");
+    }
+
+    // Store code in-process so HeartbeatWorker can use it (SAFEONE_PAIR_CODE).
+    // NOTE: ChildId is still resolved at agent startup. If the agent was launched for the wrong ChildId, restart after fixing config.
+    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", code);
+
+    if (!string.IsNullOrWhiteSpace(name))
+    {
+        Environment.SetEnvironmentVariable("SAFEONE_DEVICE_NAME", name.Trim());
+    }
+
+    return RenderSimpleMessage("Pairing queued", "Pairing code saved. The agent will attempt pairing on its next heartbeat. Return to Today and wait for status to update.", "/today", "Go to Today");
+}
+
 }

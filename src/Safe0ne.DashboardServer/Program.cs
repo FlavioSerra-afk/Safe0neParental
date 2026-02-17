@@ -4,8 +4,6 @@ using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
-using Safe0ne.DashboardServer.Reports;
-using Safe0ne.DashboardServer.Devices;
 using Safe0ne.Shared.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,10 +18,6 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
-
-// Background services (local-first)
-builder.Services.AddHostedService<ReportSchedulerService>();
-builder.Services.AddHostedService<DeviceHealthSweepService>();
 
 var app = builder.Build();
 
@@ -233,8 +227,6 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/heartbeat", async 
     {
         if (!TryGetDeviceToken(req, out var token) || !cp.TryValidateDeviceToken(id, token, out var did))
         {
-            // 16W12: record auth failures for device health attention (best-effort).
-            cp.RecordDeviceAuthFailure(id, DateTimeOffset.UtcNow);
             return Results.Unauthorized();
         }
         authenticated = true;
@@ -337,8 +329,6 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/commands/{{command
     {
         if (!TryGetDeviceToken(req, out var token) || !cp.TryValidateDeviceToken(id, token, out var did))
         {
-            // 16W12: record auth failures for device health attention (best-effort).
-            cp.RecordDeviceAuthFailure(id, DateTimeOffset.UtcNow);
             return Results.Unauthorized();
         }
         deviceId = did;
@@ -1425,6 +1415,15 @@ local.MapGet("/children/{childId:guid}/devices/pairing", (Guid childId, JsonFile
     return Results.Json(new ApiResponse<PairingStartResponse>(resp, null), JsonDefaults.Options);
 });
 
+
+// Parent can clear/cancel the current pairing session for a child.
+local.MapDelete("/children/{childId:guid}/devices/pairing", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var removed = cp.ClearPendingPairing(id);
+    return Results.Json(new ApiResponse<object>(new { removed }, null), JsonDefaults.Options);
+});
+
 // Kid enrolls with pairing code (one-time) + device info.
 local.MapPost("/devices/enroll", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
@@ -1886,14 +1885,3 @@ app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:8765");
 
 app.Run();
-
-
-// === Helper: SHA-256 hex (used by local audit/device token hashing) ===
-// In top-level statement projects, declaring a local static function here makes it available
-// throughout Program.cs (the compiler emits it on the generated Program class).
-static string ComputeSha256Hex(string input)
-{
-    var bytes = System.Text.Encoding.UTF8.GetBytes(input ?? string.Empty);
-    var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-    return System.Convert.ToHexString(hash);
-}

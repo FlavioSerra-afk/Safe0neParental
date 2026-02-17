@@ -534,40 +534,27 @@ function renderDevicesTab(child) {
   const fallback = Array.isArray(fallbackProf.devices) ? fallbackProf.devices : [];
   const devices = Array.isArray(apiDevices) ? apiDevices : (fallback.length ? fallback : []);
 
-  const counts = (Array.isArray(devices) ? devices : []).reduce((acc,d)=>{
-    const isOnline = (typeof d?.isOnline === "boolean") ? d.isOnline : (d?.lastSeenUtc ? ((Date.now() - new Date(d.lastSeenUtc).getTime()) < (3*60*1000)) : false);
-    const attention = (d && typeof d.attentionReason === "string" && d.attentionReason.trim()) ? true : false;
-    acc.total++;
-    if (attention) acc.attention++;
-    if (isOnline) acc.online++; else acc.offline++;
-    return acc;
-  }, {total:0, online:0, offline:0, attention:0});
-
   const rows = (devices.length ? devices : [{ deviceName: "No devices", status: "Not enrolled", lastSeenUtc: null }])
     .map((d) => {
       const devId = String(d?.deviceId ?? d?.id ?? "");
       const name = String(d?.deviceName ?? d?.name ?? "Device");
-  const lastSeenDt = d?.lastSeenUtc ? new Date(d.lastSeenUtc) : null;
-  const lastSeen = lastSeenDt ? lastSeenDt.toLocaleString() : (d?.lastSeen || "—");
-  const isOnline = (typeof d?.isOnline === "boolean") ? d.isOnline : !!(lastSeenDt && (Date.now() - lastSeenDt.getTime()) < (3 * 60 * 1000));
-  const attentionReason = (d && typeof d.attentionReason === "string" && d.attentionReason.trim()) ? d.attentionReason.trim() : null;
-  const health = (d && typeof d.health === "string" && d.health.trim()) ? d.health.trim() : (attentionReason ? "Attention" : (isOnline ? "Online" : "Offline"));
-  const status = String(d?.status ?? health);
-  const ver = String(d?.agentVersion || "");
-  const canUnpair = useApi && devId;
-  return `
-<div class="tr">
-  <div><strong>${escapeHtml(name)}</strong></div>
-  <div><span class="so-pill">${escapeHtml(status)}</span></div>
-  <div class="so-card-sub">${escapeHtml(lastSeen)}${ver ? ` • v${escapeHtml(ver)}` : ""}${attentionReason ? ` • <span style="font-weight:800;">${escapeHtml(attentionReason)}</span>` : ""}</div>
-  <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
-    ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
-  </div>
-</div>`;
+      const status = String(d?.status ?? (devId ? "Enrolled" : "Not paired"));
+      const lastSeen = d?.lastSeenUtc ? new Date(d.lastSeenUtc).toLocaleString() : (d?.lastSeen || "—");
+      const canUnpair = useApi && devId;
+      return `
+    <div class="tr">
+      <div><strong>${escapeHtml(name)}</strong></div>
+      <div><span class="so-pill">${escapeHtml(status)}</span></div>
+      <div class="so-card-sub">${escapeHtml(lastSeen)}</div>
+      <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+        ${canUnpair ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : `<button class="so-btn" data-action="noop" type="button">Details</button>`}
+      </div>
+    </div>`;
     })
     .join("");
 
-  const pairingBlock = (useApi
+    const pairUrl = "http://127.0.0.1:8771/pair";
+const pairingBlock = (useApi
     ? (pairing && pairing.pairingCode
         ? `<div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
             <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -575,19 +562,22 @@ function renderDevicesTab(child) {
               <div class="so-card-sub">Expires: ${escapeHtml(pairing.expiresAtUtc ? new Date(pairing.expiresAtUtc).toLocaleString() : "—")}</div>
             </div>
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="so-btn" data-action="copyPairCode" data-code="${escapeHtml(pairing.pairingCode)}" type="button">Copy</button>
+              <button class="so-btn" data-action="copyPairCode" data-code="${escapeHtml(pairing.pairingCode)}" type="button">Copy code</button>
+              <button class="so-btn" data-action="copyPairUrl" data-url="${escapeHtml(pairUrl)}" type="button">Copy Kid URL</button>
+              <button class="so-btn so-btn-danger" data-action="clearPairing" data-childid="${escapeHtml(id)}" type="button">Clear</button>
               <button class="so-btn" data-action="refreshDevices" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
             </div>
           </div>`
         : `<div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
             <div style="font-weight:900;">No active pairing session</div>
             <div class="so-card-sub" style="margin-top:6px;">Generate a pairing code and enter it on the Kid device to enroll.</div>
+            <div class="so-card-sub" style="margin-top:6px;">On the Kid device, open: <span class="so-pill">${escapeHtml(pairUrl)}</span></div>
           </div>`)
     : "");
 
   const pairActions = useApi
     ? `<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-        <button class="so-btn" data-action="pairDevice" data-childid="${escapeHtml(id)}" type="button">Generate pairing code</button>
+        <button class="so-btn" data-action="pairDevice" data-childid="${escapeHtml(id)}" type="button">Generate / refresh pairing code</button>
         <button class="so-btn" data-action="refreshDevices" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
       </div>`
     : `<div style="margin-top:12px;" class="so-card-sub">Pair devices to this child profile (local mode requires SSOT-backed child).</div>`;
@@ -597,11 +587,6 @@ function renderDevicesTab(child) {
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
         <div style="font-weight:900;font-size:18px;">Devices</div>
         <div class="so-card-sub">Local enrollment (Parent ↔ Kid)</div>
-      </div>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-        <span class="so-pill">Online ${counts.online}</span>
-        <span class="so-pill">Offline ${counts.offline}</span>
-        <span class="so-pill">Needs attention ${counts.attention}</span>
       </div>
       ${pairActions}
       ${pairingBlock}
@@ -2214,6 +2199,26 @@ if (action === "copyPairCode") {
   window.Safe0neUi?.toast?.("Copied", "Pairing code copied.");
   return;
 }
+
+if (action === "copyPairUrl") {
+  ev.preventDefault();
+  const url = btn.getAttribute("data-url") || "";
+  if (!url) return;
+  try { navigator.clipboard?.writeText?.(url); } catch {}
+  window.Safe0neUi?.toast?.("Copied", "Kid URL copied.");
+  return;
+}
+
+if (action === "clearPairing") {
+  ev.preventDefault();
+  const childId = btn.getAttribute("data-childid") || "";
+  if (!childId || !api?.clearChildPairingLocal) return;
+  await api.clearChildPairingLocal(childId);
+  await refreshDevicesForChild(childId);
+  window.Safe0neUi?.toast?.("Cleared", "Pairing session cleared.");
+  return;
+}
+
 
 if (action === "refreshDevices") {
   ev.preventDefault();
