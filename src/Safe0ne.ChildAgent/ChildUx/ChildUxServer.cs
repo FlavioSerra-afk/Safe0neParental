@@ -122,6 +122,7 @@ public sealed class ChildUxServer
                     "/" or "/today" => RenderToday(query),
                     "/request" => HandleRequest(query),
                     "/blocked" => RenderBlocked(query),
+                    "/warning" => RenderWarning(query),
                     "/pair" => RenderPair(query),
                     "/pair/complete" => HandlePair(query),
                     _ => RenderNotFound()
@@ -357,6 +358,45 @@ public sealed class ChildUxServer
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
 
         sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a></div>");
+        sb.Append("</div></body></html>");
+        return sb.ToString();
+    }
+
+    private string RenderWarning(string query)
+    {
+        var q = ParseQuery(query);
+        q.TryGetValue("minutes", out var minutesRaw);
+
+        var minutes = 0;
+        if (!string.IsNullOrWhiteSpace(minutesRaw)) int.TryParse(minutesRaw, out minutes);
+        minutes = Math.Clamp(minutes, 0, 240);
+
+        var snap = _store.GetSnapshot();
+        var st = snap.ScreenTime;
+
+        var title = minutes switch
+        {
+            <= 0 => "Screen time warning",
+            1 => "1 minute remaining",
+            _ => $"{minutes} minutes remaining"
+        };
+
+        var sb = new StringBuilder();
+        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Safe0ne Warning</title>");
+        sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .card{max-width:860px;border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .btn{display:inline-block;padding:10px 14px;border:1px solid #ddd;border-radius:10px;background:#fff;color:#111;text-decoration:none;}</style>");
+        sb.Append("</head><body><div class='card'>");
+        sb.Append($"<h1 style='margin:0 0 8px 0'>{WebUtility.HtmlEncode(title)}</h1>");
+        sb.Append("<div class='muted'>Your screen time is almost finished. You can ask a parent for more time.</div>");
+
+        if (st.HasBudget)
+        {
+            sb.Append($"<div style='margin-top:12px'><b>Today</b> · Used: {WebUtility.HtmlEncode(FormatTime(st.Used))} · Remaining: {WebUtility.HtmlEncode(FormatTime(st.Remaining))}</div>");
+        }
+
+        sb.Append("<div style='margin-top:14px'>");
+        sb.Append("<a class='btn' href='/request?type=more_time&amp;minutes=15&amp;target=screen_time&amp;reason=screen_time_warning'>Request +15 minutes</a>");
+        sb.Append("</div>");
+        sb.Append("<div style='margin-top:12px'><a href='/today'>Back to Today</a></div>");
         sb.Append("</div></body></html>");
         return sb.ToString();
     }

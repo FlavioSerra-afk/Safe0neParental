@@ -441,6 +441,8 @@ if (auth?.DeviceToken is not null)
                 {
                     _logger.LogInformation("Screen time warning: 5 minutes remaining.");
                     screenTracker.MarkWarned5();
+                    // 16W26: show a best-effort local warning screen (throttled).
+                    ChildUx.ChildUxNavigation.TryOpenWarning("time", 5, ref _lastUxNavigateUtc, _logger);
                     activityOutbox ??= new ActivityOutbox(childId);
                     activityOutbox.Enqueue(new ActivityOutbox.LocalActivityEvent(
                         EventId: Guid.NewGuid(),
@@ -454,6 +456,8 @@ if (auth?.DeviceToken is not null)
                 {
                     _logger.LogInformation("Screen time warning: 1 minute remaining.");
                     screenTracker.MarkWarned1();
+                    // 16W26: show a best-effort local warning screen (throttled).
+                    ChildUx.ChildUxNavigation.TryOpenWarning("time", 1, ref _lastUxNavigateUtc, _logger);
                     activityOutbox ??= new ActivityOutbox(childId);
                     activityOutbox.Enqueue(new ActivityOutbox.LocalActivityEvent(
                         EventId: Guid.NewGuid(),

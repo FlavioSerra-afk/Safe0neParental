@@ -25,6 +25,35 @@ public static class ChildUxNavigation
 
     private static string BaseUrl => $"http://127.0.0.1:{ResolvePort()}/";
 
+    public static void TryOpenWarning(string kind, int minutesRemaining, ref DateTimeOffset lastUxNavigateUtc, ILogger logger)
+    {
+        try
+        {
+            // Throttle: one navigation per 20 seconds.
+            var now = DateTimeOffset.UtcNow;
+            if (now - lastUxNavigateUtc < TimeSpan.FromSeconds(20)) return;
+            lastUxNavigateUtc = now;
+
+            kind = (kind ?? string.Empty).Trim().ToLowerInvariant();
+            if (kind.Length == 0) kind = "warning";
+
+            var url = BaseUrl + "warning" +
+                      $"?kind={WebUtility.UrlEncode(kind)}" +
+                      $"&minutes={minutesRemaining}";
+
+            // UseShellExecute opens default browser without requiring elevated privileges.
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Child UX navigation failed");
+        }
+    }
+
     public static void TryOpenBlocked(string kind, string target, string reason, ref DateTimeOffset lastUxNavigateUtc, ILogger logger)
     {
         try
