@@ -1807,22 +1807,7 @@ public ChildPolicy UpsertPolicy(ChildId childId, UpdateChildPolicyRequest req)
         var mod = (ulong)Math.Pow(10, digits);
         return (val % mod).ToString().PadLeft(digits, '0');
     }
-
-    private static string GenerateDeviceToken()
-    {
-        // 32 bytes => 256-bit token.
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        return Convert.ToBase64String(bytes);
-    }
-
-    private static string ComputeSha256Hex(string input)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash);
-    }
-
-    private sealed record PairedDevice(
+private sealed record PairedDevice(
         Guid DeviceId,
         string DeviceName,
         string AgentVersion,
