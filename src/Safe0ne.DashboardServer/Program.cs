@@ -2,7 +2,6 @@ using Microsoft.Extensions.Primitives;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
-using Safe0ne.DashboardServer.Reports;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
 using Safe0ne.Shared.Contracts;
@@ -19,9 +18,6 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
-
-// 16W9: Local SSOT-backed reports scheduler (best-effort; never crashes server).
-builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -89,17 +85,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/effective", (Guid c
     return Results.Json(new ApiResponse<EffectiveChildState>(effective, null), JsonDefaults.Options);
 });
 
+// LEGACY-COMPAT: UI polls status frequently; absence of heartbeat is not an error.
+// Return 200 with null data to avoid noisy 404s in the dashboard console.
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
     if (!cp.TryGetStatus(id, out var status))
     {
-        return Results.Json(
-            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_found", "Child status not found")),
-            JsonDefaults.Options,
-            statusCode: StatusCodes.Status404NotFound);
+        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
     }
-    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
+
+    return Results.Json(new ApiResponse<ChildAgentStatus?>(status, null), JsonDefaults.Options);
 });
 
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/devices", (Guid childId, JsonFileControlPlane cp) =>
@@ -861,69 +857,25 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    // Canonical request is CreateLocalChildRequest (DisplayName + optional metadata).
-    // LEGACY-COMPAT: accept older payloads that used { name: "..." }.
-    // RemoveAfter: once all UI/tests and any older agents use displayName.
-    JsonObject? raw;
-    try
-    {
-        raw = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch
-    {
-        raw = null;
-    }
-
-    if (raw is null)
+    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
+    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "Missing or invalid JSON body")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    static string? ReadStr(JsonObject obj, string key)
-        => obj.TryGetPropertyValue(key, out var v) && v is JsonValue ? v.GetValue<string>() : null;
-
-    var displayName = ReadStr(raw, "displayName") ?? ReadStr(raw, "DisplayName") ?? ReadStr(raw, "name") ?? ReadStr(raw, "Name");
-    if (string.IsNullOrWhiteSpace(displayName))
-    {
-        return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName (or legacy name) is required")),
-            JsonDefaults.Options,
-            statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    var gender = ReadStr(raw, "gender") ?? ReadStr(raw, "Gender");
-    var ageGroup = ReadStr(raw, "ageGroup") ?? ReadStr(raw, "AgeGroup");
-    LocalAvatar? avatar = null;
-    try
-    {
-        if (raw.TryGetPropertyValue("avatar", out var av) && av is not null)
-        {
-            avatar = JsonSerializer.Deserialize<LocalAvatar>(av.ToJsonString(JsonDefaults.Options), JsonDefaults.Options);
-        }
-        else if (raw.TryGetPropertyValue("Avatar", out var av2) && av2 is not null)
-        {
-            avatar = JsonSerializer.Deserialize<LocalAvatar>(av2.ToJsonString(JsonDefaults.Options), JsonDefaults.Options);
-        }
-    }
-    catch
-    {
-        // Ignore avatar parse errors; name creation is more important.
-        avatar = null;
-    }
-
-    var created = cp.CreateChild(displayName);
+    var created = cp.CreateChild(body.DisplayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    if (gender is not null || ageGroup is not null || avatar is not null)
+    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
     {
         var meta = new
         {
-            gender,
-            ageGroup,
-            avatar
+            gender = body.Gender,
+            ageGroup = body.AgeGroup,
+            avatar = body.Avatar
         };
         cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
     }
@@ -1534,7 +1486,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1558,7 +1510,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1625,28 +1577,6 @@ local.MapGet("/children/{childId:guid}/activity", (HttpRequest req, Guid childId
     return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
 });
 
-// Additive-only export envelope for activity (UI export + tests).
-// SSOT-backed; never mutates state.
-local.MapGet("/children/{childId:guid}/activity/export", (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
-{
-    DateTimeOffset? from = null;
-    DateTimeOffset? to = null;
-    if (req.Query.TryGetValue("from", out var fromV) && DateTimeOffset.TryParse(fromV.ToString(), out var f)) from = f;
-    if (req.Query.TryGetValue("to", out var toV) && DateTimeOffset.TryParse(toV.ToString(), out var t)) to = t;
-
-    // Use a larger take for export than the default UI list.
-    var json = cp.GetLocalActivityJson(new ChildId(childId), from, to, take: 5000);
-    using var doc = JsonDocument.Parse(json);
-    var eventsEl = doc.RootElement.Clone();
-
-    return Results.Json(new ApiResponse<object>(new
-    {
-        childId,
-        exportedAtUtc = DateTimeOffset.UtcNow,
-        events = eventsEl
-    }, null), JsonDefaults.Options);
-});
-
 local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
 {
     // Accept either { events: [...] } or a raw array [...]
@@ -1670,54 +1600,6 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     var json = array.GetRawText();
     cp.AppendLocalActivityJson(new ChildId(childId), json);
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
-});
-
-// Local status surface (SSOT-backed): parity with /api/v1/.../status for UI polling.
-local.MapGet("/children/{childId:guid}/status", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    if (!cp.TryGetStatus(id, out var status))
-    {
-        // Keep 200 to avoid UI console spam; missing status just means the kid hasn't checked in yet.
-        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
-    }
-
-    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
-});
-
-
-// 16W9: Reports schedule authoring + run-now (Local Mode).
-// Stored under Local Settings Profile policy.reports; execution state stored under root.reportsState.
-local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
-{
-    JsonObject? patch = null;
-    try
-    {
-        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch { }
-
-    if (patch is null)
-    {
-        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Expected JSON object schedule patch.")),
-            JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var ran = ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), DateTimeOffset.UtcNow, force: true);
-    return Results.Json(new ApiResponse<object>(new { ran }, null), JsonDefaults.Options);
 });
 
 
