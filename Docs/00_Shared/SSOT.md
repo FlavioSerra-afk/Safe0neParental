@@ -43,6 +43,19 @@ Features:
 - Every ZIP patch includes `PATCH_NOTES.md` (summary, file list, apply steps, post-apply checks).
 - One patch at a time. Avoid manual edits unless unavoidable.
 
+## Legacy compatibility (temporary shims)
+
+During migrations we may keep temporary compatibility code **only** to prevent regressions while we move call-sites to the canonical API.
+
+**Rules:**
+
+1. Any shim **must** be labeled with `LEGACY-COMPAT` and include `TODO(LEGACY-REMOVE)`.
+2. Shims must be **thin adapters** (no duplicated business logic).
+3. New features must land in canonical code, not in shims.
+4. When a canonical migration is complete, delete shims and update docs/ADRs.
+
+See: `Docs/00_Shared/Legacy-Compatibility.md`.
+
 ## Core policy precedence (shared truth)
 1) Always Allowed
 2) Grants (time-boxed exceptions approved by parent)
@@ -87,19 +100,6 @@ Geofence transitions are emitted as Activity events:
 - `geofence_exit`
 
 All additions must be **additive + backward compatible**. Old profiles/policies auto-migrate on read/write.
-
-## Compatibility shims ("legacy" surfaces)
-
-During refactors (e.g., splitting `JsonFileControlPlane` into **domain partials**), some call-sites/tests may still
-use older method signatures or parameter names.
-
-Rules:
-
-- Prefer migrating call-sites to the canonical API surface.
-- If migration would cause regressions, add **compatibility shims** (overloads/wrappers) inside SSOT.
-- Shims must be clearly labeled with comments like `// Compat overload (legacy call sites)`.
-- Shims are **temporary**: once all call-sites are migrated, shims should be removed in a dedicated cleanup patch.
-- Shims must never introduce a second store or duplicate SSOT state.
 
 ## UX baseline
 - No jargon; plain language.
