@@ -122,7 +122,12 @@ public sealed partial class JsonFileControlPlane
 
                     PersistUnsafe_NoLock();
 
-                    childId = new ChildId(kvp.Key);
+                    // Keys are persisted as string representation of the child's Guid.
+                    // Be defensive in case older data contains non-Guid keys.
+                    if (!Guid.TryParse(kvp.Key, out var childGuid))
+                        continue;
+
+                    childId = new ChildId(childGuid);
                     return true;
                 }
 

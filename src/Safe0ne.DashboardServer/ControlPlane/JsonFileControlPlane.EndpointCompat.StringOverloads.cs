@@ -1,24 +1,9 @@
-using System;
-using Safe0ne.Shared.Contracts;
+// This file intentionally contains no members.
+//
+// We previously experimented with additional string-based overloads for endpoint compatibility.
+// Those overloads were consolidated into JsonFileControlPlane.EndpointCompat.cs / *.RevokeCompat.cs.
+//
+// Keeping this file (empty) prevents patch application issues on systems that can't represent file deletions
+// while ensuring we do not introduce duplicate method signatures.
 
 namespace Safe0ne.DashboardServer.ControlPlane;
-
-public partial class JsonFileControlPlane
-{
-    /// <summary>
-    /// Back-compat overload: endpoints sometimes pass deviceId as a string.
-    /// Canonical storage uses Guid deviceId.
-    /// </summary>
-    public bool TryRevokeDeviceToken(string deviceId, string revokedBy, string? reason, out ChildId childId)
-    {
-        childId = default;
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return false;
-
-        if (!Guid.TryParse(deviceId, out var deviceGuid))
-            return false;
-
-        return TryRevokeDeviceToken(deviceGuid, revokedBy, reason, out childId);
-    }
-}
