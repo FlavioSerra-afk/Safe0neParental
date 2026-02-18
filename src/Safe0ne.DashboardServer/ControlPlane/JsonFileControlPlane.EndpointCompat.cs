@@ -137,4 +137,61 @@ public sealed partial class JsonFileControlPlane
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(ChildId childId, out bool rolledBack, out string? error)
         => TryRollbackPolicyToLastKnownGood(childId.Value, out rolledBack, out error);
+    /// <summary>
+    /// Endpoint-facing signature used by Program.cs during modular refactors.
+    /// 'requestedBy' is currently informational (future: activity/audit).
+    /// </summary>
+    public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? requestedBy, out bool rolledBack, out string? error)
+        => TryRollbackPolicyToLastKnownGood(childId.Value, out rolledBack, out error);
+
+    /// <summary>
+    /// Endpoint-facing signature used by Program.cs during modular refactors.
+    /// </summary>
+    public bool TryRollbackPolicyToLastKnownGood(Guid childId, string? requestedBy, out bool rolledBack, out string? error)
+        => TryRollbackPolicyToLastKnownGood(childId, out rolledBack, out error);
+
+    /// <summary>
+    /// Endpoint-facing token revoke signature used by Program.cs.
+    /// Removes the device entry and returns the owning childId if found.
+    /// </summary>
+    public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId? childId)
+    {
+        lock (_gate)
+        {
+            childId = null;
+
+            try
+            {
+                if (_devicesByChildGuid.Count == 0)
+                    return false;
+
+                foreach (var kvp in _devicesByChildGuid.ToList())
+                {
+                    var devices = kvp.Value;
+                    if (devices is null || devices.Count == 0) continue;
+
+                    var idx = devices.FindIndex(d => d.DeviceId == deviceId);
+                    if (idx < 0) continue;
+
+                    devices.RemoveAt(idx);
+
+                    if (devices.Count == 0)
+                        _devicesByChildGuid.Remove(kvp.Key);
+
+                    PersistUnsafe_NoLock();
+
+                    childId = new ChildId(kvp.Key);
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Treat errors as not found to keep endpoint stable; caller will surface generic failure.
+                childId = null;
+                return false;
+            }
+        }
+    }
 }
