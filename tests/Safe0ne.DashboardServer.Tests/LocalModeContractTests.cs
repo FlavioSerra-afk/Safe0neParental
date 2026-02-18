@@ -163,4 +163,34 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         var actJson = await act.Content.ReadAsStringAsync();
         Assert.Contains("report_digest", actJson);
     }
+
+
+    [Fact]
+    public async Task LocalActivity_ExportEndpoint_ReturnsEnvelopeWithEvents()
+    {
+        using var client = _factory.CreateClient();
+
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Activity Export Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // Append one activity event.
+        var occurredAt = DateTimeOffset.UtcNow.ToString("O");
+        var post = await client.PostAsJsonAsync($"/api/local/children/{childId}/activity", new[]
+        {
+            new { kind = "unit_test", occurredAtUtc = occurredAt, message = "hello" }
+        });
+        Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+
+        // Export should return a stable envelope with events array containing the item.
+        var exp = await client.GetAsync($"/api/local/children/{childId}/activity/export");
+        Assert.Equal(HttpStatusCode.OK, exp.StatusCode);
+
+        var expJson = await exp.Content.ReadAsStringAsync();
+        Assert.Contains(""events"", expJson);
+        Assert.Contains("unit_test", expJson);
+    }
 }

@@ -1490,8 +1490,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    // childId is only populated when the revoke succeeds; keep it nullable to avoid unsafe .Value usage.
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1581,6 +1580,16 @@ local.MapGet("/children/{childId:guid}/activity", (HttpRequest req, Guid childId
     var data = doc.RootElement.Clone();
     return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
 });
+
+local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
+{
+    // Export stub: JSON envelope only (safe to later bundle into diagnostics ZIP).
+    var json = cp.ExportLocalActivityJsonEnvelope(new ChildId(childId));
+    using var doc = JsonDocument.Parse(json);
+    var data = doc.RootElement.Clone();
+    return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
+});
+
 
 local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
 {

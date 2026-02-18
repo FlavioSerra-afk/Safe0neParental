@@ -46,7 +46,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
 | EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🔴 | Kid UX | SSOT: policy + runtime state | Planned in KFT-029+ |
-| EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
+| EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🟡 | Parent: Activity tab + Reports digests; Kid: emits events | SSOT: per-child append-only activity stream (30d/2000) + export envelope | 16W28: /activity export endpoint + contract test |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |
 | EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | 🟡 | Parent: audit viewer + append on saves | SSOT: append-only audit | 16W8: implemented minimal audit log; expand filters/export later |
 
