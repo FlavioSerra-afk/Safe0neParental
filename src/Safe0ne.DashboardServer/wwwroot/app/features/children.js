@@ -1,7 +1,8 @@
 (async () => {
-  // LEGACY:REMOVE_AFTER(Local-SSOT-Purity) Forbidden domain-state storage key. Kept only for purge tooling.
+  // LEGACY-COMPAT (UI): prior versions persisted domain state (children/profiles) in localStorage.
+  // SSOT LAW: browser storage is preferences-only. These keys are now treated as legacy and ignored.
+  // TODO(LEGACY-REMOVE): once all users are migrated and SSOT purity checks have been shipping, delete references.
   const LS_CHILDREN = "safe0ne.children.v1";
-  // LEGACY:REMOVE_AFTER(Local-SSOT-Purity) Forbidden domain-state storage key. Kept only for purge tooling.
   const LS_PROFILES = "safe0ne.childProfiles.v1";
   const LS_SHOW_ARCHIVED = "safe0ne.children.showArchived.v1";
   const AGE = ["0–5", "6–9", "10–12", "13–15", "16–18"];
@@ -243,11 +244,17 @@ function renderPerAppLimitsCard(child, profile) {
   }
 
   function getLocalChildren() {
-    // SSOT purity: children are stored only in Local SSOT (DashboardServer). No localStorage fallback.
-    return [];
+    // SSOT purity: do NOT read children domain state from localStorage.
+    // Keep a stable in-memory cache only (used for demo/offline rendering).
+    if (!Array.isArray(state._localChildrenCache)) state._localChildrenCache = [];
+    return state._localChildrenCache
+      .filter((x) => x && x.id && x.id !== "demo-11111111");
   }
-  function setLocalChildren(_) {
-    // SSOT purity: no-op. Local SSOT is the only store.
+  function setLocalChildren(arr) {
+    // SSOT purity: do NOT persist children domain state to localStorage.
+    state._localChildrenCache = Array.isArray(arr)
+      ? arr.filter((x) => x && x.id && x.id !== "demo-11111111")
+      : [];
   }
   function normalizeApiChild(c) {
     const id = String(c?.id ?? c?.childId ?? "");
@@ -268,27 +275,34 @@ function renderPerAppLimitsCard(child, profile) {
 
   function getChildren() {
     const useApi = state?.api?.available && Array.isArray(state.api.children);
-    const base = useApi ? state.api.children : [demoChild()];
+    const base = useApi ? state.api.children : [demoChild(), ...getLocalChildren()];
     const showArchived = !!state?.showArchived;
     return showArchived ? base : base.filter((c) => !c?.isArchived);
   }
 
   function getProfiles() {
-    // SSOT purity: profiles/policies are stored only in Local SSOT.
-    // Keep an in-memory cache for the current session to support draft editing UX.
+    // IMPORTANT: must be a stable in-memory object.
+    // Many features (e.g., geofence editor) mutate the returned object and then persist.
+    // If we re-read from storage on each call, those mutations are lost.
     if (!state._profilesCache || typeof state._profilesCache !== "object") {
+      // SSOT purity: do NOT hydrate domain state from localStorage.
       state._profilesCache = {};
     }
     return state._profilesCache;
   }
   function setProfiles(m) {
+    // SSOT purity: do NOT persist domain state to localStorage.
     state._profilesCache = (m && typeof m === "object") ? m : {};
-  }
-  function setProfiles(m) {
-    state._profilesCache = (m && typeof m === "object") ? m : {};
-    // SSOT purity: no persistence to localStorage.
   }
   function ensureProfile(child) {
+    // If the Local API is temporarily offline, we may keep an in-memory draft so the user
+    // doesn't lose edits. Drafts are NOT SSOT and must never be persisted.
+    try {
+      const did = child?.id;
+      const draft = did && state?.ui?.profileDraftByChildId && state.ui.profileDraftByChildId[did];
+      if (draft && typeof draft === "object") return draft;
+    } catch (_) {}
+
     const m = getProfiles();
     if (!m[child.id]) {
       m[child.id] = {
@@ -672,10 +686,7 @@ function renderDevicesTab(child) {
         <div style="font-weight:900;font-size:18px;">Activity</div>
         <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
           <div class="so-card-sub">Recent activity from the child device (Local mode, not synced).</div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <button class="so-btn" data-action="refreshActivity" data-childid="${escapeHtml(child.id)}" type="button">Refresh</button>
-            <button class="so-btn" data-action="exportActivity" data-childid="${escapeHtml(child.id)}" type="button">Export</button>
-          </div>
+          <button class="so-btn" data-action="refreshActivity" data-childid="${escapeHtml(child.id)}" type="button">Refresh</button>
         </div>
         <div class="table" style="margin-top:12px;">
           <div class="tr th"><div>Event</div><div>App/Site</div><div>Time</div><div>Status</div></div>
@@ -1901,37 +1912,6 @@ async function refreshDevicesFromApi(childId) {
     }
   }
 
-  async function exportActivityFromApi(childId) {
-    const id = String(childId || "");
-    if (!isGuid(id)) return false;
-    const api = window.Safe0neApi;
-    if (!api || typeof api.exportChildActivityLocal !== "function") return false;
-    try {
-      const res = await api.exportChildActivityLocal(id);
-      const env = res && res.ok ? res.data : null;
-      if (!env) return false;
-      const pretty = JSON.stringify(env, null, 2);
-      // Simple viewer: open a new window/tab with a <pre> block.
-      // This avoids introducing a second modal system and remains patch-safe.
-      const w = window.open("", "_blank");
-      if (w && w.document) {
-        w.document.title = "Safe0ne Activity Export";
-        w.document.body.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;padding:12px;">${escapeHtml(pretty)}</pre>`;
-        return true;
-      }
-      // Fallback: copy to clipboard if popups blocked.
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(pretty);
-        alert("Export copied to clipboard.");
-        return true;
-      }
-      alert(pretty);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async function refreshLocationFromApi(childId) {
     const id = String(childId || "");
     if (!isGuid(id)) return false;
@@ -2115,12 +2095,7 @@ async function refreshPairingFromApi(childId) {
       const action = btn.getAttribute("data-action");
       const childId = btn.getAttribute("data-childid");
 
-      if (action === "add") {
-        ev.preventDefault();
-        if (!state.api.available) return alert("Local service offline. This UI is read-only until the local service is available.");
-        closeModal();
-        return openAddEdit("add");
-      }
+      if (action === "add") return (ev.preventDefault(), closeModal(), openAddEdit("add"));
       if (action === "toggleShowArchived") {
         ev.preventDefault();
         state.showArchived = !state.showArchived;
@@ -2128,12 +2103,7 @@ async function refreshPairingFromApi(childId) {
         return rerenderGrid();
       }
       if (action === "open") return (ev.preventDefault(), navigate(`#/child/${childId}`));
-      if (action === "edit") {
-        ev.preventDefault();
-        if (!state.api.available) return alert("Local service offline. This UI is read-only until the local service is available.");
-        closeModal();
-        return openAddEdit("edit", childId);
-      }
+      if (action === "edit") return (ev.preventDefault(), closeModal(), openAddEdit("edit", childId));
       if (action === "delete") {
         ev.preventDefault();
         if (!childId || childId === "demo-11111111") return;
@@ -2149,14 +2119,23 @@ async function refreshPairingFromApi(childId) {
             .patchChildLocal(childId, { archived: !isArchived })
             .then(() => refreshChildrenFromApi())
             .catch(() => {
-              // SSOT purity: do not fall back to localStorage as an alternate store.
-              alert("Local service offline. Please try again when the local service is available.");
+              // If local API fails, fall back to legacy behavior without crashing the router
+              setLocalChildren(getLocalChildren().filter((c) => c.id !== childId));
+              const p = getProfiles();
+              delete p[childId];
+              setProfiles(p);
+              rerenderGrid();
             });
           return;
         }
 
-        alert("Local service offline. This UI is read-only until the local service is available.");
-        return;
+        if (!confirm("Delete this child profile?")) return;
+        setLocalChildren(getLocalChildren().filter((c) => c.id !== childId));
+        const p = getProfiles();
+        delete p[childId];
+        setProfiles(p);
+        return rerenderGrid();
+      }
       if (action === "closeModal" || action === "cancelModal") return (ev.preventDefault(), closeModal());
       if (action === "pickDefaultAvatar") {
         ev.preventDefault();
@@ -2208,17 +2187,28 @@ async function refreshPairingFromApi(childId) {
               return refreshChildrenFromApi();
             })
             .catch(() => {
-              // SSOT purity: do not fall back to localStorage as an alternate store.
-              alert("Local service offline. Changes were not saved.");
+              // Fall back to legacy localStorage mode if the local API is not reachable
+              const locals = getLocalChildren();
+              const idx = locals.findIndex((c) => c.id === state.draft.id);
+              idx >= 0 ? (locals[idx] = state.draft) : locals.push(state.draft);
+              setLocalChildren(locals);
+              ensureProfile(state.draft);
+              closeModal();
+              rerenderGrid();
             });
 
           return;
         }
 
-        alert("Local service offline. This UI is read-only until the local service is available.");
+        const locals = getLocalChildren();
+        const idx = locals.findIndex((c) => c.id === state.draft.id);
+        idx >= 0 ? (locals[idx] = state.draft) : locals.push(state.draft);
+        setLocalChildren(locals);
+        ensureProfile(state.draft);
 
         closeModal();
-        return;
+        return rerenderGrid();
+      }
 
       if (action === "backToChildren") return (ev.preventDefault(), navigate("#/children"));
 
@@ -2271,15 +2261,6 @@ if (action === "refreshActivity") {
   if (!state?.api?.available || !isGuid(cid)) return;
   Promise.resolve(refreshActivityFromApi(cid))
     .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
-    .catch(() => {});
-  return;
-}
-
-if (action === "exportActivity") {
-  ev.preventDefault();
-  const cid = childId || "";
-  if (!state?.api?.available || !isGuid(cid)) return;
-  Promise.resolve(exportActivityFromApi(cid))
     .catch(() => {});
   return;
 }
@@ -2756,16 +2737,22 @@ if (action === "revokeDeviceToken") {
               const p = getProfiles();
               p[id] = prof;
               setProfiles(p);
+              // Clear any draft when SSOT save succeeds.
+              try {
+                state.ui = state.ui || {};
+                if (state.ui.profileDraftByChildId) delete state.ui.profileDraftByChildId[id];
+              } catch (_) {}
               state.api.saveFailedByChildId[id] = false;
               window.Safe0neUi?.toast?.("Saved", "Profile updated.");
             })
             .catch(() => {
-              // Fall back to legacy localStorage mode if local API is not reachable.
-              const p = getProfiles();
-              p[id] = prof;
-              setProfiles(p);
+              // SSOT purity: do NOT claim a save happened and do NOT persist domain state locally.
+              // Keep an in-memory draft so the user doesn't lose edits during an offline window.
+              state.ui = state.ui || {};
+              state.ui.profileDraftByChildId = state.ui.profileDraftByChildId || {};
+              state.ui.profileDraftByChildId[id] = prof;
               state.api.saveFailedByChildId[id] = true;
-              window.Safe0neUi?.toast?.("Saved (local)", "Profile updated locally.");
+              window.Safe0neUi?.toast?.("Not saved", "Local service offline — changes are kept as a draft only.");
             });
           return;
         }
@@ -2791,14 +2778,18 @@ if (action === "revokeDeviceToken") {
               const p = getProfiles();
               p[id] = def;
               setProfiles(p);
+              // Clear any draft when SSOT reset succeeds.
+              try {
+                state.ui = state.ui || {};
+                if (state.ui.profileDraftByChildId) delete state.ui.profileDraftByChildId[id];
+              } catch (_) {}
               try { geoUpdateSearchDom(cid); } catch (_) {}
       try { geoUpdatePanelDom(cid); } catch (_) {}
             })
             .catch(() => {
-              // Fall back to legacy localStorage reset if local API is not reachable.
-              const p = getProfiles();
-              delete p[id];
-              setProfiles(p);
+              // SSOT purity: do NOT reset locally if SSOT is unavailable.
+              state.api.saveFailedByChildId[id] = true;
+              window.Safe0neUi?.toast?.("Not reset", "Local service offline — cannot reset policy/profile.");
               try { geoUpdateSearchDom(cid); } catch (_) {}
       try { geoUpdatePanelDom(cid); } catch (_) {}
             });

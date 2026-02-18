@@ -369,6 +369,22 @@ function runBootSelfTest() {
     }catch(err){
       ensure("localApi.controlPlaneInfo", false, String(err && (err.message || err)));
     }
+
+    // SSOT Purity: browser storage is preferences-only.
+    // Detect legacy domain-state keys so we can warn users and help purge drift.
+    try{
+      const forbidden = [
+        "safe0ne.children.v1",
+        "safe0ne.childProfiles.v1",
+      ];
+      const found = [];
+      for (const k of forbidden){
+        try{ if (localStorage.getItem(k) != null) found.push(k); }catch{ /* ignore */ }
+      }
+      ensure("ui.ssotPurity", found.length === 0, found.length ? `forbidden_keys:${found.join(",")}` : null);
+    }catch(err){
+      ensure("ui.ssotPurity", false, String(err && (err.message || err)));
+    }
   }
 
   // Expose public API
