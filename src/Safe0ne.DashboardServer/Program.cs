@@ -2,6 +2,7 @@ using Microsoft.Extensions.Primitives;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
+using Safe0ne.DashboardServer.Reports;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
 using Safe0ne.Shared.Contracts;
@@ -18,6 +19,9 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
+
+// 16W9: Local SSOT-backed reports scheduler (best-effort; never crashes server).
+builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -857,25 +861,78 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
-    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
+    // SSOT + compat: accept either { displayName: "..." } (canonical) or { name: "..." } (legacy tests/data).
+    // NOTE: Do not allow localStorage as an alternate SSOT; creation must go through the Local API.
+    JsonObject? obj = null;
+    try
+    {
+        obj = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch
+    {
+        // ignore
+    }
+
+    if (obj is null)
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "Missing or invalid JSON body")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var created = cp.CreateChild(body.DisplayName);
+    static string? ReadString(JsonObject o, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (o.TryGetPropertyValue(k, out var v) && v is not null)
+            {
+                try
+                {
+                    if (v is JsonValue jv) return jv.GetValue<string?>();
+                    return v.ToString();
+                }
+                catch { }
+            }
+        }
+        return null;
+    }
+
+    var displayName = ReadString(obj, "displayName", "DisplayName", "name", "Name");
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        return Results.Json(
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName is required")),
+            JsonDefaults.Options,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var gender = ReadString(obj, "gender", "Gender");
+    var ageGroup = ReadString(obj, "ageGroup", "AgeGroup");
+
+    LocalAvatar? avatar = null;
+    if (obj.TryGetPropertyValue("avatar", out var avNode) && avNode is not null)
+    {
+        try
+        {
+            avatar = avNode.Deserialize<LocalAvatar>(JsonDefaults.Options);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    var created = cp.CreateChild(displayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
+    if (gender is not null || ageGroup is not null || avatar is not null)
     {
         var meta = new
         {
-            gender = body.Gender,
-            ageGroup = body.AgeGroup,
-            avatar = body.Avatar
+            gender,
+            ageGroup,
+            avatar
         };
         cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
     }
@@ -1486,7 +1543,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1510,7 +1567,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1600,6 +1657,62 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     var json = array.GetRawText();
     cp.AppendLocalActivityJson(new ChildId(childId), json);
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
+});
+
+// Activity export (baseline): returns a stable JSON envelope suitable for later ZIP bundling.
+// This is SSOT-backed; no alternate stores.
+local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var take = 2000;
+    var json = cp.GetLocalActivityJson(new ChildId(childId), fromUtc: null, toUtc: null, take: take);
+    using var doc = JsonDocument.Parse(json);
+    var events = doc.RootElement.Clone();
+
+    var env = new
+    {
+        childId,
+        exportedAtUtc = DateTimeOffset.UtcNow,
+        retentionDays = 30,
+        maxEvents = take,
+        events
+    };
+
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+
+// 16W9: Reports schedule authoring + run-now (Local Mode).
+// Stored under Local Settings Profile policy.reports; execution state stored under root.reportsState.
+local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    JsonObject? patch = null;
+    try
+    {
+        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch { }
+
+    if (patch is null)
+    {
+        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Expected JSON object schedule patch.")),
+            JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var ran = ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), DateTimeOffset.UtcNow, force: true);
+    return Results.Json(new ApiResponse<object>(new { ran }, null), JsonDefaults.Options);
 });
 
 
