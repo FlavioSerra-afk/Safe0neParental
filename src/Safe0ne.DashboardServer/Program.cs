@@ -861,25 +861,69 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
-    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
+    // Canonical request is CreateLocalChildRequest (DisplayName + optional metadata).
+    // LEGACY-COMPAT: accept older payloads that used { name: "..." }.
+    // RemoveAfter: once all UI/tests and any older agents use displayName.
+    JsonObject? raw;
+    try
+    {
+        raw = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch
+    {
+        raw = null;
+    }
+
+    if (raw is null)
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "Missing or invalid JSON body")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var created = cp.CreateChild(body.DisplayName);
+    static string? ReadStr(JsonObject obj, string key)
+        => obj.TryGetPropertyValue(key, out var v) && v is JsonValue ? v.GetValue<string>() : null;
+
+    var displayName = ReadStr(raw, "displayName") ?? ReadStr(raw, "DisplayName") ?? ReadStr(raw, "name") ?? ReadStr(raw, "Name");
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        return Results.Json(
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName (or legacy name) is required")),
+            JsonDefaults.Options,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var gender = ReadStr(raw, "gender") ?? ReadStr(raw, "Gender");
+    var ageGroup = ReadStr(raw, "ageGroup") ?? ReadStr(raw, "AgeGroup");
+    LocalAvatar? avatar = null;
+    try
+    {
+        if (raw.TryGetPropertyValue("avatar", out var av) && av is not null)
+        {
+            avatar = JsonSerializer.Deserialize<LocalAvatar>(av.ToJsonString(JsonDefaults.Options), JsonDefaults.Options);
+        }
+        else if (raw.TryGetPropertyValue("Avatar", out var av2) && av2 is not null)
+        {
+            avatar = JsonSerializer.Deserialize<LocalAvatar>(av2.ToJsonString(JsonDefaults.Options), JsonDefaults.Options);
+        }
+    }
+    catch
+    {
+        // Ignore avatar parse errors; name creation is more important.
+        avatar = null;
+    }
+
+    var created = cp.CreateChild(displayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
+    if (gender is not null || ageGroup is not null || avatar is not null)
     {
         var meta = new
         {
-            gender = body.Gender,
-            ageGroup = body.AgeGroup,
-            avatar = body.Avatar
+            gender,
+            ageGroup,
+            avatar
         };
         cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
     }
@@ -1380,20 +1424,6 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
 });
 
 // v1 aliases (additive): keep Kid/diagnostics flexible without breaking the existing /api/v1/.../policy contract.
-// LEGACY-COMPAT: v1 status endpoint used by legacy dashboard status chip and older UI code. Forwards to SSOT status store.
-// RemoveAfter: vNext UI fully local-only | Tracking: Docs/00_Shared/Legacy-Code-Registry.md#api-v1-compat
-app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    if (!cp.TryGetStatus(id, out var status))
-    {
-        // Keep response shape stable and avoid 404 churn for the UI.
-        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
-    }
-
-    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
-});
-
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy/envelope", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
@@ -1429,17 +1459,6 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy/effective", 
 
 
 // Devices + enrollment
-// Local status endpoint (SSOT) — used by local-first UI modules.
-local.MapGet("/children/{childId:guid}/status", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    if (!cp.TryGetStatus(id, out var status))
-    {
-        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
-    }
-    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
-});
-
 local.MapGet("/children/{childId:guid}/devices", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
@@ -1515,8 +1534,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    // childId is nullable; do not deref .Value to avoid nullable warnings/churn.
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1540,8 +1558,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    // childId is nullable; do not deref .Value to avoid nullable warnings/churn.
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1608,6 +1625,28 @@ local.MapGet("/children/{childId:guid}/activity", (HttpRequest req, Guid childId
     return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
 });
 
+// Additive-only export envelope for activity (UI export + tests).
+// SSOT-backed; never mutates state.
+local.MapGet("/children/{childId:guid}/activity/export", (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    DateTimeOffset? from = null;
+    DateTimeOffset? to = null;
+    if (req.Query.TryGetValue("from", out var fromV) && DateTimeOffset.TryParse(fromV.ToString(), out var f)) from = f;
+    if (req.Query.TryGetValue("to", out var toV) && DateTimeOffset.TryParse(toV.ToString(), out var t)) to = t;
+
+    // Use a larger take for export than the default UI list.
+    var json = cp.GetLocalActivityJson(new ChildId(childId), from, to, take: 5000);
+    using var doc = JsonDocument.Parse(json);
+    var eventsEl = doc.RootElement.Clone();
+
+    return Results.Json(new ApiResponse<object>(new
+    {
+        childId,
+        exportedAtUtc = DateTimeOffset.UtcNow,
+        events = eventsEl
+    }, null), JsonDefaults.Options);
+});
+
 local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
 {
     // Accept either { events: [...] } or a raw array [...]
@@ -1631,6 +1670,19 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     var json = array.GetRawText();
     cp.AppendLocalActivityJson(new ChildId(childId), json);
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
+});
+
+// Local status surface (SSOT-backed): parity with /api/v1/.../status for UI polling.
+local.MapGet("/children/{childId:guid}/status", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    if (!cp.TryGetStatus(id, out var status))
+    {
+        // Keep 200 to avoid UI console spam; missing status just means the kid hasn't checked in yet.
+        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
+    }
+
+    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
 });
 
 
