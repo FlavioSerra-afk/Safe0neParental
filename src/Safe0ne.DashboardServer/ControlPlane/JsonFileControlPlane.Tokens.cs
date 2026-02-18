@@ -1,27 +1,15 @@
-using System.Security.Cryptography;
-using System.Text;
+// LEGACY-TODO: This file intentionally contains no executable members yet.
+//
+// We are splitting JsonFileControlPlane into domain-focused partials.
+// During the transition, some token helpers (GenerateDeviceToken, GetDeviceTokenTtl,
+// ComputeSha256Hex, etc.) still live in JsonFileControlPlane.cs to avoid churn and
+// accidental API surface changes.
+//
+// Once call-sites are consolidated and tests are stable, move the canonical implementations
+// here and delete the legacy copies.
 
 namespace Safe0ne.DashboardServer.ControlPlane;
 
-/// <summary>
-/// Crypto + token helpers for JsonFileControlPlane.
-/// Split into a dedicated partial to keep JsonFileControlPlane.cs focused on persistence + domain logic.
-/// </summary>
-public sealed partial class JsonFileControlPlane
+public partial class JsonFileControlPlane
 {
-    private static string GenerateDeviceToken()
-    {
-        // 256-bit random token -> hex string
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        return Convert.ToHexString(bytes).ToLowerInvariant();
-    }
-
-    private static TimeSpan GetDeviceTokenTtl() => TimeSpan.FromDays(30);
-
-    private static string ComputeSha256Hex(string input)
-    {
-        var bytes = Encoding.UTF8.GetBytes(input);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
 }
