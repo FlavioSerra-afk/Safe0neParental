@@ -1,11 +1,16 @@
 # User Manual (Living)
 
-Updated: 2026-02-16
+Updated: 2026-02-18
 
 This is the **user-facing** manual for implemented Safe0ne functionality.
 
 - It is updated whenever a feature transitions 🔴→🟡 or 🟡→✅ in `Docs/00_Shared/Feature_Registry.md`.
 - It describes *what the user can do today*, not future plans.
+
+
+## SSOT note (important)
+- The UI does **not** persist children/profiles/policies in browser storage.
+- If the Local API is unavailable, the UI should show a **Local service offline** state (read-only) rather than diverging from SSOT.
 
 ## Sections
 1. `00_Overview.md`

@@ -158,6 +158,19 @@
           <p class="muted" style="margin-top:8px;">Notes: this page is front-end only. It is safe to ship because it is hidden behind an unlock gesture.</p>
         </div>
 
+
+        <div class="card" style="margin-top:16px;">
+          <h2 style="margin-top:0;">SSOT Purity self-test</h2>
+          <p class="muted">Guards against parallel UI storage. When <code>/api/local/_health</code> is reachable, domain state must NOT be persisted in <code>localStorage</code>.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn" id="dtSsoRun">Run SSOT test</button>
+            <button class="btn" id="dtSsoPurge" title="Remove forbidden domain-state keys from localStorage">Purge forbidden keys</button>
+          </div>
+          <div id="dtSsoStatus" class="muted" style="margin-top:10px;min-height:18px;"></div>
+          <pre id="dtSsoDetails" class="code" style="white-space:pre-wrap;margin-top:10px;display:none;"></pre>
+          <p class="muted" style="margin-top:8px;">Allowed: UI preferences only (theme, filters, devtools unlock). Forbidden: children/profiles/policies/devices as UI-held SSOT.</p>
+        </div>
+
         ${activityCard}
 
         ${modulesCard}
@@ -217,6 +230,81 @@
           _setFeedback("Failed to clear cache (see console). ");
         }
       });
+
+      // SSOT Purity self-test
+      const $ssoRun = document.getElementById("dtSsoRun");
+      const $ssoPurge = document.getElementById("dtSsoPurge");
+      const $ssoStatus = document.getElementById("dtSsoStatus");
+      const $ssoDetails = document.getElementById("dtSsoDetails");
+
+      const FORBIDDEN_KEYS = [
+        "safe0ne.children.v1",
+        "safe0ne.childProfiles.v1",
+      ];
+
+      function _setSsoStatus(msg, detailsObj) {
+        if ($ssoStatus) $ssoStatus.textContent = msg || "";
+        if ($ssoDetails) {
+          if (detailsObj) {
+            $ssoDetails.style.display = "block";
+            $ssoDetails.textContent = JSON.stringify(detailsObj, null, 2);
+          } else {
+            $ssoDetails.style.display = "none";
+            $ssoDetails.textContent = "";
+          }
+        }
+      }
+
+      async function _runSsoTest() {
+        try {
+          _setSsoStatus("Running...", null);
+          // Health reachable?
+          let healthOk = false;
+          try {
+            const res = await fetch("/api/local/_health", { cache: "no-store" });
+            healthOk = res.ok;
+          } catch { healthOk = false; }
+
+          const present = [];
+          try {
+            for (const k of FORBIDDEN_KEYS) {
+              if (localStorage.getItem(k) != null) present.push(k);
+            }
+          } catch { /* ignore */ }
+
+          if (!healthOk) {
+            return _setSsoStatus("Local API not reachable: SSOT test skipped (UI should be read-only).", { healthOk, forbiddenKeysPresent: present });
+          }
+
+          if (present.length > 0) {
+            return _setSsoStatus("FAIL: Forbidden domain-state keys found in localStorage.", { healthOk, forbiddenKeysPresent: present });
+          }
+
+          return _setSsoStatus("PASS: No forbidden domain-state keys present (SSOT purity OK).", { healthOk, forbiddenKeysPresent: present });
+        } catch (e) {
+          console.warn("DevTools: SSOT test failed", e);
+          _setSsoStatus("SSOT test error (see console).", { error: String(e) });
+        }
+      }
+
+      function _purgeForbiddenKeys() {
+        try {
+          let removed = 0;
+          for (const k of FORBIDDEN_KEYS) {
+            if (localStorage.getItem(k) != null) {
+              localStorage.removeItem(k);
+              removed++;
+            }
+          }
+          _setSsoStatus(`Purged ${removed} forbidden key(s).`, { removed, keys: FORBIDDEN_KEYS });
+        } catch (e) {
+          console.warn("DevTools: purge failed", e);
+          _setSsoStatus("Purge failed (see console).", { error: String(e) });
+        }
+      }
+
+      $ssoRun?.addEventListener("click", _runSsoTest);
+      $ssoPurge?.addEventListener("click", _purgeForbiddenKeys);
 
       // Recent Activity (Local Mode)
       const $actChildId = document.getElementById("dtActChildId");

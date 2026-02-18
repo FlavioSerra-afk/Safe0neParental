@@ -1,41 +1,70 @@
 # Legacy Compatibility Policy
 
-This project is mid-migration from earlier “single-file / monolith” implementations to **domain-partial** implementations (ControlPlane, Contracts, etc.). During that migration we sometimes keep **compatibility shims** so older call-sites (or tests) continue to compile while we move consumers to the canonical API.
+Updated: 2026-02-18
+
+This project is mid-migration from earlier “single-file / monolith” implementations to **canonical SSOT + modular domains**.
+
+Legacy must never become “parallel SSOT”. It exists only to avoid breaking older persisted data or older agent/app call-sites while we migrate.
+
+---
 
 ## Definitions
 
 ### Canonical API
-The preferred, stable API surface that new code must use.
+The preferred, stable API surface that new code must use. Canonical behavior must be implemented **once**.
 
 ### Legacy compat / shim
-Temporary code that exists **only** to keep older call-sites compiling and to avoid large, risky rewrites in a single patch.
+Temporary code that exists only to:
+- accept older shapes/keys/names and map them to canonical
+- preserve older call-sites while migration is underway
 
-## Required labeling
+**A legacy shim must forward to canonical logic.** No duplicated behavior.
 
-Any compat/shim must be clearly labeled:
+---
 
-* **File name** should include `Legacy`, `Compat`, or `EndpointCompat` where practical.
-* **Header comment** at the top of the file:
+## Allowed legacy
 
+### ✅ Back-compat mapping (healthy)
+- Accept older persisted keys/shapes, map to canonical SSOT.
+- Deterministic mapping only.
+
+### ⚠️ Compat endpoints (facade-only)
+- `/api/v1/*` may exist temporarily.
+- Must call the same canonical ControlPlane methods as `/api/local/*`.
+
+---
+
+## Disallowed legacy
+
+### 🚫 Alternate SSOT
+- UI persisting children/profiles/policies/etc. into localStorage.
+
+LocalStorage is for **preferences only**.
+
+---
+
+## Required annotations
+C#:
 ```csharp
-// LEGACY-COMPAT: Temporary compatibility shim.
-// TODO(LEGACY-REMOVE): Remove once all call-sites are migrated to the canonical API.
+// LEGACY-COMPAT: <reason> | RemoveAfter: <milestone> | Tracking: <Docs section / issue>
+// TODO(LEGACY-REMOVE): <explicit condition>
+```
+JS:
+```js
+// LEGACY:REMOVE_AFTER(<condition>)
 ```
 
-* **Tracking tag**: every shim must contain `TODO(LEGACY-REMOVE)` so we can find and remove them with a single search.
+---
 
-## Design rules
+## Deprecation / removal checklist (required)
+A legacy shim may be removed only when:
+1. All call-sites are migrated to canonical.
+2. Stored-data compatibility is proven (migration evidence or mapping tests).
+3. Tests cover canonical behavior.
+4. The entry is removed from `Legacy-Code-Registry.md`.
 
-1. **No new features in shims.** Features go into canonical code.
-2. Shims should be **thin adapters** that delegate to canonical implementations.
-3. Prefer **overloads** or **extension methods** (when appropriate) over duplicating logic.
-4. Avoid creating *multiple* shims for the same concept—keep **one single source of truth**.
+---
 
-## Removal criteria
-
-A shim can be removed when:
-
-* All call-sites compile against the canonical API, **and**
-* Tests cover the canonical path (or the shim is no longer referenced).
-
-When removing, delete the shim file and update ADRs/SSOT if the canonical surface changed.
+## Registry (required)
+All legacy shims must be listed in:
+- `Docs/00_Shared/Legacy-Code-Registry.md`

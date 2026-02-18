@@ -1,107 +1,177 @@
 # SSOT — Safe0ne Parental (Shared)
 
-Updated: 2026-02-04
+Updated: 2026-02-18
 
-## Product
-**Safe0ne Parental** is a cross-platform parental control system built as **two apps**:
-- **Parent App**: configuration, approvals, reporting
-- **Child App (Agent)**: enforcement + child-facing experience
+## Purpose
+This document is **LAW**. It defines the **single source of truth (SSOT)** and the rules that keep Safe0ne maintainable while we ship features fast **without regressions**.
 
-Windows is first:
-- Parent App: Windows UI via WebView2
-- Child App: Windows agent/service + child UX
+Safe0ne Parental is a cross-app system:
+- **Parent App (Windows)**: config + approvals + reporting (WebView2 UI)
+- **DashboardServer (Windows localhost)**: local-first API + ControlPlane SSOT + UI static hosting
+- **Child Agent (Windows)**: enforcement + child UX
+- **Shared.Contracts**: DTOs used across Parent↔Server↔Child
 
-## Non-negotiable workflow
+---
 
-## UI modularization policy (DashboardServer UI)
-**Goal:** reduce regression risk from ZIP extraction overwriting hot files (especially `router.js`) by isolating feature logic into stable modules.
+## Non-negotiables
+1. **Docs-first**: `/Docs/**` is the plan; code must match.
+2. **Green always**: every patch must build + tests green.
+3. **Canonical-first**: one canonical implementation per behavior.
+4. **Legacy is thin**: legacy shims forward to canonical and are tracked for removal.
+5. **No parallel SSOT**: no alternate stores for domain data.
 
-**Decision log:** See ADR **ADR-0003 — Modular DashboardServer UI feature modules** (`/Docs/00_Shared/ADRs/ADR-0003-Modular-DashboardServer-UI-Modules.md`).
+---
 
-### Rules
-- Prefer **feature modules** under: `src/Safe0ne.DashboardServer/wwwroot/app/features/`
-- Keep `src/.../wwwroot/app/router.js` **thin** (route parsing + mounting + calling module hooks).
-- Each feature change should ideally touch **one module file** (plus tests) rather than editing `router.js`.
-- A **master bootstrap/feature-flags** file may enable/disable modules for controlled rollout.
+## SSOT invariants
 
-### Recommended modules (DashboardServer UI)
-Core:
-- `core/api_client.js` (fetch wrappers + error handling)
-- `core/state_store.js` (cache + refresh orchestration)
-- `core/format_utils.js` (UTC parsing, duration formatting, CSV helpers)
-- `core/feature_flags.js` (enable/disable feature modules)
+### Canonical store
+The canonical persisted state is the **ControlPlane SSOT**:
+- `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane*.cs`
 
-Features:
-- `features/alerts.js`
-- `features/requests.js`
-- `features/support.js`
-- `features/reports.js`
-- `features/policies.js`
-- `features/children.js`
+All domain mutations (children, profiles, policies, requests, alerts, reports, device registry) **must** flow through ControlPlane.
 
-- Patches, fixes, and implementation steps are delivered as **ZIP patches** with full file paths.
-- Every ZIP patch includes `PATCH_NOTES.md` (summary, file list, apply steps, post-apply checks).
-- One patch at a time. Avoid manual edits unless unavoidable.
+### Allowed local state
+Local-only state is allowed only for:
+- UI preferences (filters, expanded panels, selected tab)
+- dev-only toggles (DevTools unlocked)
 
-## Legacy compatibility (temporary shims)
+### Forbidden local state
+The following must **never** be persisted as “fallback SSOT”:
+- children list
+- child profile / policy / geofences
+- device registry / tokens
+- requests / grants
+- alerts / activity
+- reports schedule
 
-During migrations we may keep temporary compatibility code **only** to prevent regressions while we move call-sites to the canonical API.
+If Local API is unavailable, the UI must render:
+- read-only skeleton or “Local service offline” state
+- optional **DevTools-only Demo Mode** (explicitly non-SSOT, clearly labelled)
 
-**Rules:**
+---
 
-1. Any shim **must** be labeled with `LEGACY-COMPAT` and include `TODO(LEGACY-REMOVE)`.
-2. Shims must be **thin adapters** (no duplicated business logic).
-3. New features must land in canonical code, not in shims.
-4. When a canonical migration is complete, delete shims and update docs/ADRs.
+## LocalStorage policy (UI)
 
-See: `Docs/00_Shared/Legacy-Compatibility.md`.
+### Allowed key types
+- `safe0ne_devtools_unlocked_v1`
+- `safe0ne.theme.*` (if present)
+- `safe0ne.ui.*` preference keys (filters/sorts/toggles)
 
-## Core policy precedence (shared truth)
-1) Always Allowed
-2) Grants (time-boxed exceptions approved by parent)
-3) Mode (Lockdown/Open/Homework/Bedtime)
-4) Schedules & Budgets (bedtime/school/homework/daily limits)
+### Disallowed keys
+Any key that persists domain state (children/profiles/policy/etc.).
 
-## Sidebar rule
-To keep the sidebar small: **all child policy controls live inside Child Profile** in the Parent App.
+### Enforcement
+DevTools must include a **Self-Test: SSOT Purity**:
+- If `/api/local/_health` is reachable, then **no domain state keys** may be written to localStorage.
+- A single allow-list of keys lives in code.
 
+---
 
+## “Legacy” — definition and allowed uses
+Legacy exists in two forms. Only one is healthy.
 
-## Phase A (Stub completeness first)
-Immediate priority is **end-to-end stubs** across Parent UI → Local SSOT → Local API → Kid agent awareness/logging.
-Stubs must be visible in the UI, stored in SSOT with safe defaults, and wired through Local API (even if enforcement/analytics are placeholders).
+### ✅ Allowed: Back-compat mapping (healthy)
+Examples:
+- Server mapping legacy policy keys/shapes to canonical policy objects
+- Agent parsing legacy field names for older stored policy data
 
-## Planned policy surface (full model)
-The shared policy surface (Windows-first, cross-platform compatible) includes:
-- **Mode**: Open / Homework / Bedtime / Lockdown
-- **Time budget**: daily minutes, warning thresholds, schedules
-  - `policy.timeBudget.dailyMinutes`
-  - `policy.timeBudget.graceMinutes` *(PATCH 16R, optional; default 0)*
-  - `policy.timeBudget.warnAtMinutes` *(PATCH 16R, optional; default [5,1])*
-  - `policy.timeBudget.schedules.*`
-- **Routines**: bedtime/school/homework presets (templates)
-- **Apps**: allow/deny list, per-app limits, block new apps (stubs)
-- **Web**: category rules allow/alert/block, SafeSearch toggles (stubs), allow/deny domains
-- **Exceptions**: time-boxed temporary grants (per app/site/category)
-- **Always Allowed**: apps/sites/contacts that always work (emergency/school)
-- **Location**: sharing on/off, geofences (stubs)
-- **Alerts**: toggles/thresholds for alert generation (stubs)
+Rules:
+- must be deterministic (no “best effort” guesses)
+- must be **thin adapters**
+- must be tracked in `Legacy-Code-Registry.md`
 
-## Derived state (stored in SSOT, additive)
-Some values are not "policy" but are still stored in the Local Control Plane to avoid parallel registries and enable deterministic behavior.
+### ⚠️ Allowed but temporary: Compat facades (API)
+Examples:
+- `/api/v1/*` endpoints that forward to `/api/local/*` canonical logic
 
-- **locationState**
-  - `geofences[]`: per-geofence inside/outside state and last transition
-    - `{ id, inside, lastTransitionAtUtc }`
-  - `lastEvaluatedAtUtc`: last evaluation timestamp
+Rules:
+- must call the same canonical ControlPlane methods
+- must not implement separate behavior
+- must not store data elsewhere
 
-Geofence transitions are emitted as Activity events:
-- `geofence_enter`
-- `geofence_exit`
+### 🚫 Not allowed: Alternate SSOT / behavior fallback
+Example:
+- UI persisting children/profiles into localStorage when Local API fails
 
-All additions must be **additive + backward compatible**. Old profiles/policies auto-migrate on read/write.
+This is the fastest way to create “UI != SSOT” bugs and must be removed.
 
-## UX baseline
-- No jargon; plain language.
-- Every restriction shows “why” and offers a request path.
-- Every parent setting has a tooltip explanation and safe default.
+---
+
+## Canonical-first enforcement
+
+### Canonical API rule
+- Implement behavior **once**.
+- Canonical surfaces are stable and referenced by endpoints.
+- Legacy shims forward to canonical.
+
+### Required tags
+C#:
+```csharp
+// LEGACY-COMPAT: <reason> | RemoveAfter: <milestone> | Tracking: <Docs section / issue>
+// TODO(LEGACY-REMOVE): <explicit condition>
+```
+JS:
+```js
+// LEGACY:REMOVE_AFTER(<condition>)
+```
+
+### Registry (required)
+Every shim must be listed in:
+- `Docs/00_Shared/Legacy-Code-Registry.md`
+
+---
+
+## Contracts evolution (anti-churn)
+
+### Problem
+Positional record DTO constructors + named args cause patch cascades:
+- rename breaks compilation
+- overloads collide
+
+### Policy
+- **Production contracts may remain positional records**, but tests/tools must not construct them using named args.
+- Prefer one of:
+  1) **Builder/factory** (recommended)
+  2) A stable helper method per DTO (in tests)
+
+Example policy:
+- In tests: `ContractBuilders.Heartbeat(...)` (single place to update when fields evolve)
+
+### Hygiene
+Comments in `Shared.Contracts` must point to the actual canonical DTO type and never claim “authoritative lives here” when the file is a stub.
+
+---
+
+## Modularization rules (avoid spaghetti)
+
+### DashboardServer UI modules (ADR-0003)
+- Keep `wwwroot/app/router.js` minimal and stable.
+- Implement features in `wwwroot/app/features/*.js`.
+- Add to `module-registry.js`.
+
+### ControlPlane partials by domain (ADR-0004)
+- Split internals into domain partials **without changing endpoint-facing signatures**.
+- Extract helpers first; keep the API surface stable.
+- Never duplicate helpers across partials (avoid CS0111).
+
+Recommended domain partial targets:
+- `JsonFileControlPlane.Children.cs`
+- `JsonFileControlPlane.Alerts.cs`
+- `JsonFileControlPlane.Activity.cs`
+- `JsonFileControlPlane.Reports.cs`
+- `JsonFileControlPlane.Audit.cs`
+
+---
+
+## Required self-tests (DevTools)
+DevTools must expose a diagnostics view that can run:
+- **SSOT Purity** (localStorage allow-list)
+- **Local API health** (`/api/local/_health`)
+- **Compat facade sanity** (optional): `/api/v1/_health` delegates to same logic (if retained)
+
+---
+
+## Patch workflow (summary)
+The authoritative workflow is in `Docs/00_Shared/Patch_Workflow.md`.
+
+Key rule: **every change is a single ZIP patch** and must keep the repo green.

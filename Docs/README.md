@@ -1,17 +1,28 @@
-# Safe0ne Parental — Documentation Index
+# Docs (LAW)
 
-Updated: 2026-02-04
+Updated: 2026-02-18
 
-Two apps:
-- Parent App (controller UI)
-- Child App (agent + child-facing UX)
+If you read only one thing first, read:
+1. `00_Shared/SSOT.md` (SSOT laws + modularization + legacy rules)
+2. `00_Shared/Patch_Workflow.md` (zip patch workflow)
+3. `00_Shared/Feature_Registry.md` (what must exist)
+4. `10_Parent_App/Implementation_Matrix.md` and `20_Child_App/Implementation_Matrix.md` (delivery tracker)
 
-Docs layout:
-- `/Docs/00_Shared` — shared truth (SSOT, contracts, security/privacy, ADRs)
-- ADR-0003 — Modular DashboardServer UI feature modules (prevents router.js overwrite regressions)
-- `/Docs/10_Parent_App` — parent-only milestones, matrices, UX
-- `/Docs/20_Child_App` — child-only milestones, matrices, UX
+## ADRs (decisions)
+- `00_Shared/ADRs/` (Local-first control plane, UI modules, ControlPlane partials, legacy deprecation)
 
+## Product docs
+- Parent App: `10_Parent_App/`
+- Child App: `20_Child_App/`
+- UI/UX spec pack: `30_UI_UX_Pack/`
+- User manual: `90_User_Manual/`
 
-Patch rule:
-All code changes must be delivered as ZIP patches with `PATCH_NOTES.md`.
+## Where to add new docs
+Prefer updating existing docs. Add new files only when:
+- a rule cannot fit cleanly into `SSOT.md`, or
+- a decision needs an ADR.
+
+## Canonical indices
+- SSOT laws: `00_Shared/SSOT.md`
+- Legacy policy: `00_Shared/Legacy-Compatibility.md`
+- Legacy inventory: `00_Shared/Legacy-Code-Registry.md`
