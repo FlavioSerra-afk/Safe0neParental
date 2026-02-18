@@ -66,6 +66,10 @@ const Safe0neApi = {
     return await _get(`/api/local/children/${encodeURIComponent(childId)}/activity${qs}`);
   },
 
+  async exportChildActivityLocal(childId){
+    return await _get(`/api/local/children/${encodeURIComponent(childId)}/activity/export`);
+  },
+
   // Local Mode: Location (last known)
   async getChildLocationLocal(childId){
     return await _get(`/api/local/children/${encodeURIComponent(childId)}/location`);
@@ -80,17 +84,6 @@ const Safe0neApi = {
       key: String(key || ""),
       acked: !!acked
     });
-  },
-
-  // Local Mode: Reports scheduling (16W9)
-  async getChildReportsScheduleLocal(childId){
-    return await _get(`/api/local/children/${encodeURIComponent(childId)}/reports/schedule`);
-  },
-  async putChildReportsScheduleLocal(childId, payload){
-    return await _put(`/api/local/children/${encodeURIComponent(childId)}/reports/schedule`, payload);
-  },
-  async runChildReportsNowLocal(childId){
-    return await _post(`/api/local/children/${encodeURIComponent(childId)}/reports/run-now`, {});
   },
 
   async getChildPolicy(childId){

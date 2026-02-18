@@ -672,7 +672,10 @@ function renderDevicesTab(child) {
         <div style="font-weight:900;font-size:18px;">Activity</div>
         <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
           <div class="so-card-sub">Recent activity from the child device (Local mode, not synced).</div>
-          <button class="so-btn" data-action="refreshActivity" data-childid="${escapeHtml(child.id)}" type="button">Refresh</button>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="so-btn" data-action="refreshActivity" data-childid="${escapeHtml(child.id)}" type="button">Refresh</button>
+            <button class="so-btn" data-action="exportActivity" data-childid="${escapeHtml(child.id)}" type="button">Export</button>
+          </div>
         </div>
         <div class="table" style="margin-top:12px;">
           <div class="tr th"><div>Event</div><div>App/Site</div><div>Time</div><div>Status</div></div>
@@ -1898,6 +1901,37 @@ async function refreshDevicesFromApi(childId) {
     }
   }
 
+  async function exportActivityFromApi(childId) {
+    const id = String(childId || "");
+    if (!isGuid(id)) return false;
+    const api = window.Safe0neApi;
+    if (!api || typeof api.exportChildActivityLocal !== "function") return false;
+    try {
+      const res = await api.exportChildActivityLocal(id);
+      const env = res && res.ok ? res.data : null;
+      if (!env) return false;
+      const pretty = JSON.stringify(env, null, 2);
+      // Simple viewer: open a new window/tab with a <pre> block.
+      // This avoids introducing a second modal system and remains patch-safe.
+      const w = window.open("", "_blank");
+      if (w && w.document) {
+        w.document.title = "Safe0ne Activity Export";
+        w.document.body.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;padding:12px;">${escapeHtml(pretty)}</pre>`;
+        return true;
+      }
+      // Fallback: copy to clipboard if popups blocked.
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pretty);
+        alert("Export copied to clipboard.");
+        return true;
+      }
+      alert(pretty);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function refreshLocationFromApi(childId) {
     const id = String(childId || "");
     if (!isGuid(id)) return false;
@@ -2237,6 +2271,15 @@ if (action === "refreshActivity") {
   if (!state?.api?.available || !isGuid(cid)) return;
   Promise.resolve(refreshActivityFromApi(cid))
     .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+    .catch(() => {});
+  return;
+}
+
+if (action === "exportActivity") {
+  ev.preventDefault();
+  const cid = childId || "";
+  if (!state?.api?.available || !isGuid(cid)) return;
+  Promise.resolve(exportActivityFromApi(cid))
     .catch(() => {});
   return;
 }
