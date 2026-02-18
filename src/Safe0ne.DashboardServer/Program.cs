@@ -857,57 +857,27 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    // LEGACY-COMPAT: accept { name: "..." } from older tests/callers while canonical is { displayName: "..." }.
-    // RemoveAfter: all callers migrated to displayName + Legacy registry entry cleared.
-    // Tracking: Docs/00_Shared/Legacy-Code-Registry.md
-
-    JsonElement bodyEl;
-    try
-    {
-        bodyEl = (await req.ReadFromJsonAsync<JsonElement>(JsonDefaults.Options))!;
-    }
-    catch
-    {
-        bodyEl = default;
-    }
-
-    string? displayName = null;
-    if (bodyEl.ValueKind == JsonValueKind.Object)
-    {
-        if (bodyEl.TryGetProperty("displayName", out var dn) && dn.ValueKind == JsonValueKind.String) displayName = dn.GetString();
-        else if (bodyEl.TryGetProperty("DisplayName", out var dn2) && dn2.ValueKind == JsonValueKind.String) displayName = dn2.GetString();
-        else if (bodyEl.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String) displayName = n.GetString();
-    }
-
-    if (string.IsNullOrWhiteSpace(displayName))
+    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
+    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName (or legacy name) is required")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var created = cp.CreateChild(displayName);
+    var created = cp.CreateChild(body.DisplayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    // We parse these from JSON to keep the canonical DTO small and additive-only.
-    if (bodyEl.ValueKind == JsonValueKind.Object)
+    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
     {
-        string? gender = null;
-        string? ageGroup = null;
-        LocalAvatar? avatar = null;
-        if (bodyEl.TryGetProperty("gender", out var g) && g.ValueKind == JsonValueKind.String) gender = g.GetString();
-        if (bodyEl.TryGetProperty("ageGroup", out var ag) && ag.ValueKind == JsonValueKind.String) ageGroup = ag.GetString();
-        if (bodyEl.TryGetProperty("avatar", out var av) && av.ValueKind != JsonValueKind.Null && av.ValueKind != JsonValueKind.Undefined)
+        var meta = new
         {
-            try { avatar = JsonSerializer.Deserialize<LocalAvatar>(av.GetRawText(), JsonDefaults.Options); } catch { avatar = null; }
-        }
-
-        if (gender is not null || ageGroup is not null || avatar is not null)
-        {
-            var meta = new { gender, ageGroup, avatar };
-            cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
-        }
+            gender = body.Gender,
+            ageGroup = body.AgeGroup,
+            avatar = body.Avatar
+        };
+        cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
     }
 
     var snap = cp.GetChildrenWithArchiveState(includeArchived: true)
@@ -1632,6 +1602,25 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
 });
 
+// Activity export (Local Mode)
+// Returns a stable envelope with "events" for UI export and contract tests.
+local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
+{
+    // Export intentionally ignores query filters for now and emits a single bundle.
+    var eventsJson = cp.GetLocalActivityJson(new ChildId(childId), fromUtc: null, toUtc: null, take: 1000);
+    using var eventsDoc = JsonDocument.Parse(eventsJson);
+    var events = eventsDoc.RootElement.Clone();
+
+    var envelope = new
+    {
+        childId,
+        exportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+        events
+    };
+
+    return Results.Json(new ApiResponse<object>(envelope, null), JsonDefaults.Options);
+});
+
 
 local.MapGet("/children/{childId:guid}/location", (Guid childId, JsonFileControlPlane cp) =>
 {
@@ -1691,6 +1680,50 @@ local.MapPost("/children/{childId:guid}/location", async (HttpRequest req, Guid 
     var payload = outDoc.RootElement.Clone();
     return Results.Json(new ApiResponse<JsonElement>(payload, null), JsonDefaults.Options);
 });
+
+// Reports (Local Mode)
+// Minimal SSOT-backed schedule and run-now surfaces for dashboard + tests.
+local.MapGet("/children/{childId:guid}/reports", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var nowUtc = DateTimeOffset.UtcNow;
+    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), nowUtc);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPatch("/children/{childId:guid}/reports", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    JsonObject? patch;
+    try
+    {
+        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch
+    {
+        patch = null;
+    }
+
+    if (patch is null)
+    {
+        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Missing or invalid JSON body")), JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    Safe0ne.DashboardServer.Reports.ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
+
+    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+// Run digest now (force) - accept POST (canonical) and GET (legacy/UI convenience) to avoid 405 churn.
+static IResult RunDigestNow(Guid childId, JsonFileControlPlane cp)
+{
+    var nowUtc = DateTimeOffset.UtcNow;
+    var ran = Safe0ne.DashboardServer.Reports.ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), nowUtc, force: true);
+    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), nowUtc);
+    return Results.Json(new ApiResponse<object>(new { ran, envelope = env }, null), JsonDefaults.Options);
+}
+
+local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) => RunDigestNow(childId, cp));
+local.MapGet("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) => RunDigestNow(childId, cp));
 
 static bool TryExtractLatLon(JsonElement locationObj, out double lat, out double lon)
 {
