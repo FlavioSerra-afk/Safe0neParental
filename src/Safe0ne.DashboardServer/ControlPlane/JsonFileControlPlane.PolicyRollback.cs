@@ -21,10 +21,10 @@ namespace Safe0ne.DashboardServer.ControlPlane;
 public partial class JsonFileControlPlane
 {
     /// <summary>
-    /// Canonical rollback API: rolls the child's LocalSettingsProfile "policy" surface back to the
+    /// Internal rollback implementation (API surface lives in EndpointCompat partial): rolls the child's LocalSettingsProfile "policy" surface back to the
     /// embedded last-known-good snapshot (if present).
     /// </summary>
-    public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string requestedBy, out bool rolledBack, out string? error)
+    private bool TryRollbackPolicyToLastKnownGood_Internal(ChildId childId, string requestedBy, out bool rolledBack, out string? error)
     {
         rolledBack = false;
         error = null;
@@ -100,9 +100,4 @@ public partial class JsonFileControlPlane
             return true;
         }
     }
-
-    // --- Compat overloads (legacy call sites) ---
-
-    public bool TryRollbackPolicyToLastKnownGood(Guid childId, string requestedBy, out bool rolledBack, out string? error)
-        => TryRollbackPolicyToLastKnownGood(new ChildId(childId), requestedBy, out rolledBack, out error);
 }

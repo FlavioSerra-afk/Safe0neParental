@@ -72,83 +72,25 @@ public sealed partial class JsonFileControlPlane
     /// This is deliberately conservative and additive: if no embedded LKG exists, it reports 'rolledBack=false'.
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(Guid childId, out bool rolledBack, out string? error)
-    {
-        lock (_gate)
-        {
-            rolledBack = false;
-            error = null;
-
-            try
-            {
-                var key = childId.ToString();
-                if (!_localSettingsProfileJsonByChildGuid.TryGetValue(key, out var current) || string.IsNullOrWhiteSpace(current))
-                {
-                    error = "no_settings_profile";
-                    return true;
-                }
-
-                JsonNode? node = null;
-                try
-                {
-                    node = JsonNode.Parse(current);
-                }
-                catch
-                {
-                    // If profile isn't parseable, we can't safely discover embedded LKG.
-                    error = "settings_profile_invalid_json";
-                    return true;
-                }
-
-                if (node is not JsonObject obj)
-                {
-                    error = "settings_profile_not_object";
-                    return true;
-                }
-
-                // We look for a small set of known/anticipated fields used by policy watchdog/rollback work.
-                // If present, these store the last-known-good profile JSON as a string.
-                string? lkg =
-                    obj["lastKnownGoodProfileJson"]?.GetValue<string?>()
-                    ?? obj["lastKnownGoodJson"]?.GetValue<string?>()
-                    ?? obj["policyLastKnownGoodJson"]?.GetValue<string?>();
-
-                if (string.IsNullOrWhiteSpace(lkg))
-                {
-                    error = "no_last_known_good";
-                    return true;
-                }
-
-                _localSettingsProfileJsonByChildGuid[key] = lkg!;
-                PersistUnsafe_NoLock();
-
-                rolledBack = true;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-        }
-    }
+        => TryRollbackPolicyToLastKnownGood_Internal(new ChildId(childId), "system", out rolledBack, out error);
 
     /// <summary>
     /// Convenience overload for ChildId value object.
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(ChildId childId, out bool rolledBack, out string? error)
-        => TryRollbackPolicyToLastKnownGood(childId.Value, out rolledBack, out error);
+        => TryRollbackPolicyToLastKnownGood_Internal(childId, "system", out rolledBack, out error);
     /// <summary>
     /// Endpoint-facing signature used by Program.cs during modular refactors.
     /// 'requestedBy' is currently informational (future: activity/audit).
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(ChildId childId, string? requestedBy, out bool rolledBack, out string? error)
-        => TryRollbackPolicyToLastKnownGood(childId.Value, out rolledBack, out error);
+        => TryRollbackPolicyToLastKnownGood_Internal(childId, string.IsNullOrWhiteSpace(requestedBy) ? "system" : requestedBy!, out rolledBack, out error);
 
     /// <summary>
     /// Endpoint-facing signature used by Program.cs during modular refactors.
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(Guid childId, string? requestedBy, out bool rolledBack, out string? error)
-        => TryRollbackPolicyToLastKnownGood(childId, out rolledBack, out error);
+        => TryRollbackPolicyToLastKnownGood_Internal(new ChildId(childId), string.IsNullOrWhiteSpace(requestedBy) ? "system" : requestedBy!, out rolledBack, out error);
 
     /// <summary>
     /// Endpoint-facing token revoke signature used by Program.cs.
