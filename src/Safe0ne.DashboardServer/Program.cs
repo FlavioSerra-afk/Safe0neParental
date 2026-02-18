@@ -490,10 +490,10 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy/rollback-la
 
     if (!cp.TryRollbackPolicyToLastKnownGood(id, updatedBy, out var rolled, out var err))
     {
-        return Results.Json(new ApiResponse<ChildPolicy>(null, new ApiError("rollback_failed", err)), JsonDefaults.Options, statusCode: StatusCodes.Status409Conflict);
+        return Results.Json(new ApiResponse<bool>(false, new ApiError("rollback_failed", err ?? "rollback_failed")), JsonDefaults.Options, statusCode: StatusCodes.Status409Conflict);
     }
 
-    return Results.Json(new ApiResponse<ChildPolicy>(rolled, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<bool>(rolled, null), JsonDefaults.Options);
 });
 
 
