@@ -861,78 +861,25 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    // SSOT + compat: accept either { displayName: "..." } (canonical) or { name: "..." } (legacy tests/data).
-    // NOTE: Do not allow localStorage as an alternate SSOT; creation must go through the Local API.
-    JsonObject? obj = null;
-    try
-    {
-        obj = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch
-    {
-        // ignore
-    }
-
-    if (obj is null)
+    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
+    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "Missing or invalid JSON body")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    static string? ReadString(JsonObject o, params string[] keys)
-    {
-        foreach (var k in keys)
-        {
-            if (o.TryGetPropertyValue(k, out var v) && v is not null)
-            {
-                try
-                {
-                    if (v is JsonValue jv) return jv.GetValue<string?>();
-                    return v.ToString();
-                }
-                catch { }
-            }
-        }
-        return null;
-    }
-
-    var displayName = ReadString(obj, "displayName", "DisplayName", "name", "Name");
-    if (string.IsNullOrWhiteSpace(displayName))
-    {
-        return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName is required")),
-            JsonDefaults.Options,
-            statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    var gender = ReadString(obj, "gender", "Gender");
-    var ageGroup = ReadString(obj, "ageGroup", "AgeGroup");
-
-    LocalAvatar? avatar = null;
-    if (obj.TryGetPropertyValue("avatar", out var avNode) && avNode is not null)
-    {
-        try
-        {
-            avatar = avNode.Deserialize<LocalAvatar>(JsonDefaults.Options);
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    var created = cp.CreateChild(displayName);
+    var created = cp.CreateChild(body.DisplayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    if (gender is not null || ageGroup is not null || avatar is not null)
+    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
     {
         var meta = new
         {
-            gender,
-            ageGroup,
-            avatar
+            gender = body.Gender,
+            ageGroup = body.AgeGroup,
+            avatar = body.Avatar
         };
         cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
     }
@@ -1433,6 +1380,20 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
 });
 
 // v1 aliases (additive): keep Kid/diagnostics flexible without breaking the existing /api/v1/.../policy contract.
+// LEGACY-COMPAT: v1 status endpoint used by legacy dashboard status chip and older UI code. Forwards to SSOT status store.
+// RemoveAfter: vNext UI fully local-only | Tracking: Docs/00_Shared/Legacy-Code-Registry.md#api-v1-compat
+app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    if (!cp.TryGetStatus(id, out var status))
+    {
+        // Keep response shape stable and avoid 404 churn for the UI.
+        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
+    }
+
+    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
+});
+
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy/envelope", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
@@ -1468,6 +1429,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy/effective", 
 
 
 // Devices + enrollment
+// Local status endpoint (SSOT) — used by local-first UI modules.
+local.MapGet("/children/{childId:guid}/status", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    if (!cp.TryGetStatus(id, out var status))
+    {
+        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
+    }
+    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
+});
+
 local.MapGet("/children/{childId:guid}/devices", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
@@ -1543,7 +1515,8 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    // childId is nullable; do not deref .Value to avoid nullable warnings/churn.
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1567,7 +1540,8 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    // childId is nullable; do not deref .Value to avoid nullable warnings/churn.
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1657,27 +1631,6 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     var json = array.GetRawText();
     cp.AppendLocalActivityJson(new ChildId(childId), json);
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
-});
-
-// Activity export (baseline): returns a stable JSON envelope suitable for later ZIP bundling.
-// This is SSOT-backed; no alternate stores.
-local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var take = 2000;
-    var json = cp.GetLocalActivityJson(new ChildId(childId), fromUtc: null, toUtc: null, take: take);
-    using var doc = JsonDocument.Parse(json);
-    var events = doc.RootElement.Clone();
-
-    var env = new
-    {
-        childId,
-        exportedAtUtc = DateTimeOffset.UtcNow,
-        retentionDays = 30,
-        maxEvents = take,
-        events
-    };
-
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
 });
 
 
