@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+using System;
 using Safe0ne.Shared.Contracts;
 
 namespace Safe0ne.DashboardServer.ControlPlane;
@@ -8,54 +8,13 @@ namespace Safe0ne.DashboardServer.ControlPlane;
 public sealed partial class JsonFileControlPlane
 {
     /// <summary>
-    /// Revoke a paired device token by removing the paired device entry.
-    /// Returns true if the operation executed; 'revoked' indicates whether a device was actually removed.
+    /// Revoke a paired device token while preserving the paired device record.
+    /// Returns true if the operation executed; 'revoked' indicates whether a device token was actually revoked.
     /// </summary>
     public bool TryRevokeDeviceToken(Guid deviceId, out bool revoked, out string? error)
     {
-        lock (_gate)
-        {
-            revoked = false;
-            error = null;
-
-            try
-            {
-                if (_devicesByChildGuid.Count == 0)
-                {
-                    return true;
-                }
-
-                foreach (var kvp in _devicesByChildGuid.ToList())
-                {
-                    var devices = kvp.Value;
-                    if (devices is null || devices.Count == 0) continue;
-
-                    var idx = devices.FindIndex(d => d.DeviceId == deviceId);
-                    if (idx >= 0)
-                    {
-                        devices.RemoveAt(idx);
-                        revoked = true;
-
-                        // Clean empty lists to keep snapshots tidy.
-                        if (devices.Count == 0)
-                        {
-                            _devicesByChildGuid.Remove(kvp.Key);
-                        }
-
-                        PersistUnsafe_NoLock();
-                        return true;
-                    }
-                }
-
-                // Not found is not an error; caller decides how to surface.
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-        }
+        // Canonical implementation lives in Tokens partial; this is an endpoint-facing wrapper.
+        return TryRevokeDeviceToken_Internal(deviceId, "system", null, out _, out revoked, out error);
     }
 
     /// <summary>
@@ -65,6 +24,29 @@ public sealed partial class JsonFileControlPlane
     {
         // childId is advisory; we still search defensively to avoid SSOT drift.
         return TryRevokeDeviceToken(deviceId, out revoked, out error);
+    }
+
+    /// <summary>
+    /// Endpoint-facing token revoke signature used by Program.cs.
+    /// Preserves the device record but invalidates the current token.
+    /// </summary>
+    public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId? childId)
+    {
+        childId = null;
+
+        var ok = TryRevokeDeviceToken_Internal(deviceId, revokedBy, reason, out var owner, out var revoked, out _);
+        if (!ok)
+        {
+            return false;
+        }
+
+        if (!revoked)
+        {
+            return false;
+        }
+
+        childId = owner;
+        return childId is not null;
     }
 
     /// <summary>
@@ -79,6 +61,7 @@ public sealed partial class JsonFileControlPlane
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(ChildId childId, out bool rolledBack, out string? error)
         => TryRollbackPolicyToLastKnownGood_Internal(childId, "system", out rolledBack, out error);
+
     /// <summary>
     /// Endpoint-facing signature used by Program.cs during modular refactors.
     /// 'requestedBy' is currently informational (future: activity/audit).
@@ -91,55 +74,4 @@ public sealed partial class JsonFileControlPlane
     /// </summary>
     public bool TryRollbackPolicyToLastKnownGood(Guid childId, string? requestedBy, out bool rolledBack, out string? error)
         => TryRollbackPolicyToLastKnownGood_Internal(new ChildId(childId), string.IsNullOrWhiteSpace(requestedBy) ? "system" : requestedBy!, out rolledBack, out error);
-
-    /// <summary>
-    /// Endpoint-facing token revoke signature used by Program.cs.
-    /// Removes the device entry and returns the owning childId if found.
-    /// </summary>
-    // Canonical-ish revoke signature used by some endpoint handlers.
-    public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId? childId)
-    {
-        lock (_gate)
-        {
-            childId = null;
-
-            try
-            {
-                if (_devicesByChildGuid.Count == 0)
-                    return false;
-
-                foreach (var kvp in _devicesByChildGuid.ToList())
-                {
-                    var devices = kvp.Value;
-                    if (devices is null || devices.Count == 0) continue;
-
-                    var idx = devices.FindIndex(d => d.DeviceId == deviceId);
-                    if (idx < 0) continue;
-
-                    devices.RemoveAt(idx);
-
-                    if (devices.Count == 0)
-                        _devicesByChildGuid.Remove(kvp.Key);
-
-                    PersistUnsafe_NoLock();
-
-                    // Keys are persisted as string representation of the child's Guid.
-                    // Be defensive in case older data contains non-Guid keys.
-                    if (!Guid.TryParse(kvp.Key, out var childGuid))
-                        continue;
-
-                    childId = new ChildId(childGuid);
-                    return true;
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                // Treat errors as not found to keep endpoint stable; caller will surface generic failure.
-                childId = null;
-                return false;
-            }
-        }
-    }
 }

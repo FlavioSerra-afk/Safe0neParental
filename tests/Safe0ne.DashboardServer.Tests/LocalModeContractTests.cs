@@ -47,4 +47,82 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         var devices = await client.GetAsync($"/api/local/children/{id}/devices");
         Assert.Equal(HttpStatusCode.OK, devices.StatusCode);
     }
+
+    [Fact]
+    public async Task LocalDeviceRevoke_InvalidatesToken_ButKeepsDeviceRecord()
+    {
+        using var client = _factory.CreateClient();
+
+        // Create a child in local mode.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Revoke Test Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // Start pairing (v1).
+        var start = await client.PostAsync($"/api/v1/children/{childId}/pair/start", content: null);
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+
+        using var startDoc = JsonDocument.Parse(await start.Content.ReadAsStringAsync());
+        var pairingCode = startDoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(pairingCode));
+
+        // Complete pairing (v1) to obtain device token and id.
+        var complete = await client.PostAsJsonAsync($"/api/v1/children/{childId}/pair/complete", new
+        {
+            pairingCode,
+            deviceName = "TestDevice",
+            agentVersion = "test"
+        });
+        Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+
+        using var completeDoc = JsonDocument.Parse(await complete.Content.ReadAsStringAsync());
+        var deviceId = completeDoc.RootElement.GetProperty("data").GetProperty("deviceId").GetString();
+        var token = completeDoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(deviceId));
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        // Heartbeat should succeed with token when devices exist.
+        using (var hbReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat"))
+        {
+            hbReq.Headers.Add("X-Safe0ne-Device-Token", token);
+            hbReq.Content = JsonContent.Create(new
+            {
+                deviceName = "TestDevice",
+                agentVersion = "test",
+                sentAtUtc = DateTimeOffset.UtcNow
+            });
+
+            var hbRes = await client.SendAsync(hbReq);
+            Assert.Equal(HttpStatusCode.OK, hbRes.StatusCode);
+        }
+
+        // Revoke token in local mode.
+        var revoke = await client.PostAsJsonAsync($"/api/local/devices/{deviceId}/revoke", new { revokedBy = "test", reason = "unit" });
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+
+        // Device record should still exist.
+        var devices = await client.GetAsync($"/api/local/children/{childId}/devices");
+        Assert.Equal(HttpStatusCode.OK, devices.StatusCode);
+
+        var devicesJson = await devices.Content.ReadAsStringAsync();
+        Assert.Contains(deviceId!, devicesJson);
+
+        // Heartbeat must now fail with the old token.
+        using (var hbReq2 = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat"))
+        {
+            hbReq2.Headers.Add("X-Safe0ne-Device-Token", token);
+            hbReq2.Content = JsonContent.Create(new
+            {
+                deviceName = "TestDevice",
+                agentVersion = "test",
+                sentAtUtc = DateTimeOffset.UtcNow
+            });
+
+            var hbRes2 = await client.SendAsync(hbReq2);
+            Assert.Equal(HttpStatusCode.Unauthorized, hbRes2.StatusCode);
+        }
+    }
 }

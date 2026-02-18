@@ -10,6 +10,8 @@ This document lists **temporary compatibility code** that should be removed once
 |---|---|---|---|---|
 | Shared.Contracts | `LegacyAliases*.cs` | Back-compat type/ctor/shape aliases to keep older callers/tests building during contract migrations. | Canonical contract types in `Safe0ne.Shared.Contracts` (non-legacy). | All call sites updated and CI green with no `LegacyAliases*` references. |
 | DashboardServer ControlPlane | `JsonFileControlPlane.EndpointCompat*.cs` | Endpoint parameter/shape shims (string/Guid parsing, older route shapes). | Canonical ControlPlane methods in domain partials. | All endpoints use canonical signatures and no more string overloads are referenced. |
+| DashboardServer ControlPlane | `JsonFileControlPlane.EndpointCompat.RevokeStringOverload.cs` | String deviceId revoke overload used by older callers. | `TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId? childId)` | No references to string overload remain (search: `TryRevokeDeviceToken(string`). |
+| DashboardServer ControlPlane | `JsonFileControlPlane.RevokeCompat.cs` | Placeholder file retained to prevent stale patch layering regressions; contains no members. | N/A | When patch history no longer needs placeholder and repo is clean. |
 | DashboardServer ControlPlane | `*.Compat*.cs` (if present) | Transitional wrappers while splitting `JsonFileControlPlane` into domain partials. | Domain partials (Policy/Tokens/Pairing/etc.). | Wrapper methods no longer referenced. |
 
 ## Tag convention
