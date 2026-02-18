@@ -20,3 +20,10 @@ Capture non-trivial decisions as ADRs in `/Docs/00_Shared/ADRs`.
 
 
 UI modularization note: see ADR-0003.
+
+
+## Code organization
+
+- **Large domain services** (e.g. `JsonFileControlPlane`) are allowed to be split into **`partial` classes** by domain to keep each file small and reviewable.
+- **Compatibility / legacy shims** must live in clearly named files (e.g. `*.Compat.*`, `Legacy*`) and include a `TODO(LEGACY-REMOVE)` comment describing the removal criteria.
+- Before deleting legacy shims, run the solution rebuild + tests and verify no callers remain.

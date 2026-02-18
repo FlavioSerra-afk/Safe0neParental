@@ -1,6 +1,9 @@
 using System;
 using Safe0ne.Shared.Contracts;
 
+// TODO(LEGACY-REMOVE): Compatibility shim. Remove after all endpoints + callers migrate to canonical control plane APIs.
+
+
 namespace Safe0ne.DashboardServer.ControlPlane;
 
 /// <summary>
