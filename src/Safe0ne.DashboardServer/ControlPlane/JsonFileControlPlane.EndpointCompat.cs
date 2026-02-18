@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Safe0ne.Shared.Contracts;
+// LEGACY-COMPAT: endpoint parameter shims (string/guid parsing) | remove when all callers use canonical signatures
 
 namespace Safe0ne.DashboardServer.ControlPlane;
 
@@ -122,12 +123,7 @@ public sealed partial class JsonFileControlPlane
 
                     PersistUnsafe_NoLock();
 
-                    // Keys are persisted as string representation of the child's Guid.
-                    // Be defensive in case older data contains non-Guid keys.
-                    if (!Guid.TryParse(kvp.Key, out var childGuid))
-                        continue;
-
-                    childId = new ChildId(childGuid);
+                    childId = new ChildId(kvp.Key);
                     return true;
                 }
 
