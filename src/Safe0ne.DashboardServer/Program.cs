@@ -1490,7 +1490,8 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    // childId is only populated when the revoke succeeds; keep it nullable to avoid unsafe .Value usage.
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
