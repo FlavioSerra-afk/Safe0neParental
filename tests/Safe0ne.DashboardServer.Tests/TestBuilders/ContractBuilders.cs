@@ -29,7 +29,7 @@ public static class ContractBuilders
             LastPolicyApplyFailedAtUtc: null,
             LastPolicyApplyError: null,
             PolicyApplyPendingSinceUtc: null,
-            PolicyApplyOverdue: null,
+            PolicyApplyOverdue: false,
             PolicyApplyState: null,
             LastKnownGoodPolicyVersion: null,
             RecommendedRollbackPolicyVersion: null,
