@@ -88,6 +88,19 @@ Geofence transitions are emitted as Activity events:
 
 All additions must be **additive + backward compatible**. Old profiles/policies auto-migrate on read/write.
 
+## Compatibility shims ("legacy" surfaces)
+
+During refactors (e.g., splitting `JsonFileControlPlane` into **domain partials**), some call-sites/tests may still
+use older method signatures or parameter names.
+
+Rules:
+
+- Prefer migrating call-sites to the canonical API surface.
+- If migration would cause regressions, add **compatibility shims** (overloads/wrappers) inside SSOT.
+- Shims must be clearly labeled with comments like `// Compat overload (legacy call sites)`.
+- Shims are **temporary**: once all call-sites are migrated, shims should be removed in a dedicated cleanup patch.
+- Shims must never introduce a second store or duplicate SSOT state.
+
 ## UX baseline
 - No jargon; plain language.
 - Every restriction shows “why” and offers a request path.
