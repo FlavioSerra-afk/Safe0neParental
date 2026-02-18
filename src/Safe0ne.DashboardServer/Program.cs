@@ -2,7 +2,6 @@ using Microsoft.Extensions.Primitives;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
-using Safe0ne.DashboardServer.Reports;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
 using Safe0ne.Shared.Contracts;
@@ -19,9 +18,6 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
-
-// 16W9: Local SSOT-backed reports scheduler (best-effort; never crashes server).
-builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -1490,7 +1486,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1514,7 +1510,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1581,16 +1577,6 @@ local.MapGet("/children/{childId:guid}/activity", (HttpRequest req, Guid childId
     return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
 });
 
-local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
-{
-    // Export stub: JSON envelope only (safe to later bundle into diagnostics ZIP).
-    var json = cp.ExportLocalActivityJsonEnvelope(new ChildId(childId));
-    using var doc = JsonDocument.Parse(json);
-    var data = doc.RootElement.Clone();
-    return Results.Json(new ApiResponse<JsonElement>(data, null), JsonDefaults.Options);
-});
-
-
 local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
 {
     // Accept either { events: [...] } or a raw array [...]
@@ -1614,41 +1600,6 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     var json = array.GetRawText();
     cp.AppendLocalActivityJson(new ChildId(childId), json);
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
-});
-
-
-// 16W9: Reports schedule authoring + run-now (Local Mode).
-// Stored under Local Settings Profile policy.reports; execution state stored under root.reportsState.
-local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
-{
-    JsonObject? patch = null;
-    try
-    {
-        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch { }
-
-    if (patch is null)
-    {
-        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Expected JSON object schedule patch.")),
-            JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
-    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var ran = ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), DateTimeOffset.UtcNow, force: true);
-    return Results.Json(new ApiResponse<object>(new { ran }, null), JsonDefaults.Options);
 });
 
 

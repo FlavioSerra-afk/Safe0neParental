@@ -190,7 +190,7 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         Assert.Equal(HttpStatusCode.OK, exp.StatusCode);
 
         var expJson = await exp.Content.ReadAsStringAsync();
-        Assert.Contains(""events"", expJson);
+        Assert.Contains("\"events\"", expJson);
         Assert.Contains("unit_test", expJson);
     }
 }
