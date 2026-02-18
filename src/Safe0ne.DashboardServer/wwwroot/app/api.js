@@ -82,6 +82,17 @@ const Safe0neApi = {
     });
   },
 
+  // Local Mode: Reports scheduling (16W9)
+  async getChildReportsScheduleLocal(childId){
+    return await _get(`/api/local/children/${encodeURIComponent(childId)}/reports/schedule`);
+  },
+  async putChildReportsScheduleLocal(childId, payload){
+    return await _put(`/api/local/children/${encodeURIComponent(childId)}/reports/schedule`, payload);
+  },
+  async runChildReportsNowLocal(childId){
+    return await _post(`/api/local/children/${encodeURIComponent(childId)}/reports/run-now`, {});
+  },
+
   async getChildPolicy(childId){
     return await _get(`/api/v1/children/${encodeURIComponent(childId)}/policy`);
   },

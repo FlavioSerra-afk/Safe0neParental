@@ -39,7 +39,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-POLICY-WEB-SAFETY | Policy | SafeSearch/Restricted toggles persisted | ✅ | Parent: web safety toggles | SSOT: policy web safety | Implemented in 16T stream |
 | EPIC-LOCATION-GEOFENCE | Location | Geofence authoring + overlay + evaluation + alerts | ✅ | Parent: geofence overlay UX; Kid: eval; Alerts: activity | SSOT: geofence config + event stream | Implemented 16U13–16U15 |
 | EPIC-ALERTS-INBOX | Alerts | Alerts inbox: routing + grouping + ack | ✅ | Parent: Alerts inbox UI + ack | SSOT: alert routing/config + ack endpoints | Self-test PASS restored in 16W7a |
-| EPIC-REPORTS | Reports | Reports scheduling | 🟡 | Parent: reports scheduling surface | SSOT: report schedules (stub) | 16W7 = stub only |
+| EPIC-REPORTS | Reports | Reports scheduling (local digest) | 🟢 | Parent: reports scheduling surface + run-now | SSOT: policy.reports + reportsState + activity report_digest | 16W9: local scheduler + endpoints |
 | EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Parent: pairing UX + device registry; Kid: pairing endpoint stub | SSOT: device registry + enrollment tokens | Implemented in 16W10–16W14 (minimal) |
 | EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🔴 | Kid agent | SSOT: policy versions + heartbeat | Planned in KFT-006+ |
 | EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |

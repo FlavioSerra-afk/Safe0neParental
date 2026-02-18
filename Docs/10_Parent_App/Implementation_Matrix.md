@@ -60,7 +60,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-ALERT-004 | Alerts | Alerts acknowledgment stored in SSOT (compact model) | Win✅ | ✅ | PATCH_16W3 |
 | P-ALERT-005 | Alerts | Alerts ack endpoints | Win✅ | ✅ | PATCH_16W4 |
 | P-ALERT-006 | Alerts | Inbox toolbar + compact layout fixes | Win✅ | ✅ | PATCH_16W5, 16W6 |
-| P-REPORT-001 | Reports | Reports scheduling surface (stub) | Win✅ | 🟡 | PATCH_16W7 (stub) |
+| P-REPORT-001 | Reports | Reports scheduling surface + run-now (local digest) | Win✅ | 🟢 | PATCH_16W9_LOCAL_REPORTS |
 | P-POL-001 | Policies | Screen time grace + warnings config | Win✅ | ✅ | PATCH_16R |
 | P-POL-002 | Policies | Per-app limits authoring UI validation | Win✅ | ✅ | PATCH_16S |
 | P-POL-003 | Policies | SafeSearch / Restricted toggles persisted | Win✅ | ✅ | PATCH_16T |

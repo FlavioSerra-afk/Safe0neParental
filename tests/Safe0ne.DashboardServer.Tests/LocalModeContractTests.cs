@@ -125,4 +125,42 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
             Assert.Equal(HttpStatusCode.Unauthorized, hbRes2.StatusCode);
         }
     }
+
+    [Fact]
+    public async Task LocalReports_ScheduleAndRunNow_AreAvailable_AndEmitDigestActivity()
+    {
+        using var client = _factory.CreateClient();
+
+        // Create a child in local mode.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Reports Test Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // GET schedule envelope exists.
+        var get0 = await client.GetAsync($"/api/local/children/{childId}/reports/schedule");
+        Assert.Equal(HttpStatusCode.OK, get0.StatusCode);
+
+        // PUT schedule should succeed.
+        var put = await client.PutAsJsonAsync($"/api/local/children/{childId}/reports/schedule", new
+        {
+            enabled = true,
+            digest = new { frequency = "daily", timeLocal = "18:00", weekday = "sun" }
+        });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        // Run now should emit a digest activity event.
+        var run = await client.PostAsJsonAsync($"/api/local/children/{childId}/reports/run-now", new { });
+        Assert.Equal(HttpStatusCode.OK, run.StatusCode);
+
+        // Query recent activity and ensure report_digest appears.
+        var from = DateTimeOffset.UtcNow.AddMinutes(-5).ToString("O");
+        var act = await client.GetAsync($"/api/local/children/{childId}/activity?from={Uri.EscapeDataString(from)}&take=100");
+        Assert.Equal(HttpStatusCode.OK, act.StatusCode);
+
+        var actJson = await act.Content.ReadAsStringAsync();
+        Assert.Contains("report_digest", actJson);
+    }
 }
