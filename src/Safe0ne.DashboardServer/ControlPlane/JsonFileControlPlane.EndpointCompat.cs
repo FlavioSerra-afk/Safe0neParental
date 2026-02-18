@@ -1,6 +1,5 @@
 using System.Text.Json.Nodes;
 using Safe0ne.Shared.Contracts;
-// LEGACY-COMPAT: endpoint parameter shims (string/guid parsing) | remove when all callers use canonical signatures
 
 namespace Safe0ne.DashboardServer.ControlPlane;
 
@@ -97,6 +96,7 @@ public sealed partial class JsonFileControlPlane
     /// Endpoint-facing token revoke signature used by Program.cs.
     /// Removes the device entry and returns the owning childId if found.
     /// </summary>
+    // Canonical-ish revoke signature used by some endpoint handlers.
     public bool TryRevokeDeviceToken(Guid deviceId, string revokedBy, string? reason, out ChildId? childId)
     {
         lock (_gate)
@@ -123,7 +123,12 @@ public sealed partial class JsonFileControlPlane
 
                     PersistUnsafe_NoLock();
 
-                    childId = new ChildId(kvp.Key);
+                    // Keys are persisted as string representation of the child's Guid.
+                    // Be defensive in case older data contains non-Guid keys.
+                    if (!Guid.TryParse(kvp.Key, out var childGuid))
+                        continue;
+
+                    childId = new ChildId(childGuid);
                     return true;
                 }
 
