@@ -85,17 +85,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/effective", (Guid c
     return Results.Json(new ApiResponse<EffectiveChildState>(effective, null), JsonDefaults.Options);
 });
 
-// LEGACY-COMPAT: UI polls status frequently; absence of heartbeat is not an error.
-// Return 200 with null data to avoid noisy 404s in the dashboard console.
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
     if (!cp.TryGetStatus(id, out var status))
     {
-        return Results.Json(new ApiResponse<ChildAgentStatus?>(null, null), JsonDefaults.Options);
+        return Results.Json(
+            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_found", "Child status not found")),
+            JsonDefaults.Options,
+            statusCode: StatusCodes.Status404NotFound);
     }
-
-    return Results.Json(new ApiResponse<ChildAgentStatus?>(status, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
 });
 
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/devices", (Guid childId, JsonFileControlPlane cp) =>
@@ -857,27 +857,57 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
-    var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
-    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
+    // LEGACY-COMPAT: accept { name: "..." } from older tests/callers while canonical is { displayName: "..." }.
+    // RemoveAfter: all callers migrated to displayName + Legacy registry entry cleared.
+    // Tracking: Docs/00_Shared/Legacy-Code-Registry.md
+
+    JsonElement bodyEl;
+    try
+    {
+        bodyEl = (await req.ReadFromJsonAsync<JsonElement>(JsonDefaults.Options))!;
+    }
+    catch
+    {
+        bodyEl = default;
+    }
+
+    string? displayName = null;
+    if (bodyEl.ValueKind == JsonValueKind.Object)
+    {
+        if (bodyEl.TryGetProperty("displayName", out var dn) && dn.ValueKind == JsonValueKind.String) displayName = dn.GetString();
+        else if (bodyEl.TryGetProperty("DisplayName", out var dn2) && dn2.ValueKind == JsonValueKind.String) displayName = dn2.GetString();
+        else if (bodyEl.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String) displayName = n.GetString();
+    }
+
+    if (string.IsNullOrWhiteSpace(displayName))
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "displayName (or legacy name) is required")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var created = cp.CreateChild(body.DisplayName);
+    var created = cp.CreateChild(displayName);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
-    if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
+    // We parse these from JSON to keep the canonical DTO small and additive-only.
+    if (bodyEl.ValueKind == JsonValueKind.Object)
     {
-        var meta = new
+        string? gender = null;
+        string? ageGroup = null;
+        LocalAvatar? avatar = null;
+        if (bodyEl.TryGetProperty("gender", out var g) && g.ValueKind == JsonValueKind.String) gender = g.GetString();
+        if (bodyEl.TryGetProperty("ageGroup", out var ag) && ag.ValueKind == JsonValueKind.String) ageGroup = ag.GetString();
+        if (bodyEl.TryGetProperty("avatar", out var av) && av.ValueKind != JsonValueKind.Null && av.ValueKind != JsonValueKind.Undefined)
         {
-            gender = body.Gender,
-            ageGroup = body.AgeGroup,
-            avatar = body.Avatar
-        };
-        cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
+            try { avatar = JsonSerializer.Deserialize<LocalAvatar>(av.GetRawText(), JsonDefaults.Options); } catch { avatar = null; }
+        }
+
+        if (gender is not null || ageGroup is not null || avatar is not null)
+        {
+            var meta = new { gender, ageGroup, avatar };
+            cp.UpsertLocalChildMetaJson(created.Id, JsonSerializer.Serialize(meta, JsonDefaults.Options));
+        }
     }
 
     var snap = cp.GetChildrenWithArchiveState(includeArchived: true)
@@ -1486,7 +1516,7 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Revoke a device token (parent action). Keeps the device record but makes auth fail.
@@ -1510,7 +1540,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
