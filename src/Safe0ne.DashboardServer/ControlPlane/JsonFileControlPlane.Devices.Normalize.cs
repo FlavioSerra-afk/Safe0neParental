@@ -36,20 +36,44 @@ public sealed partial class JsonFileControlPlane
 
                 // Defensive: if any device has an empty hash (older schema), generate a non-empty placeholder
                 // so auth logic never crashes. This does NOT mint a usable token; it only stabilizes storage.
-                for (var i = 0; i < cleaned.Count; i++)
+                for (var idx = 0; idx < cleaned.Count; idx++)
                 {
-                    var d = cleaned[i];
-                    if (string.IsNullOrWhiteSpace(d.TokenHashSha256))
+                    var device = cleaned[idx];
+                    if (string.IsNullOrWhiteSpace(device.TokenHashSha256))
                     {
-                        // placeholder hash derived from device id
-                        var placeholder = ComputeSha256Hex(d.DeviceId.ToString("N"));
-                        cleaned[i] = new PairedDevice(
-                            DeviceId: d.DeviceId,
-                            DeviceName: d.DeviceName,
-                            AgentVersion: d.AgentVersion,
-                            PairedAtUtc: d.PairedAtUtc,
-                            TokenHashSha256: placeholder);
+                        // Placeholder hash derived from device id.
+                        // NOTE: This does NOT mint a usable token; it only stabilizes storage.
+                        var placeholder = ComputeSha256Hex(device.DeviceId.ToString("N"));
+                        cleaned[idx] = new PairedDevice(
+                            DeviceId: device.DeviceId,
+                            DeviceName: device.DeviceName,
+                            AgentVersion: device.AgentVersion,
+                            PairedAtUtc: device.PairedAtUtc,
+                            TokenHashSha256: placeholder,
+                            LastSeenUtc: device.LastSeenUtc,
+                            TokenIssuedAtUtc: device.TokenIssuedAtUtc ?? device.PairedAtUtc,
+                            TokenExpiresAtUtc: device.TokenExpiresAtUtc,
+                            TokenRevokedAtUtc: device.TokenRevokedAtUtc,
+                            TokenRevokedBy: device.TokenRevokedBy,
+                            TokenRevokedReason: device.TokenRevokedReason);
                     }
+                }
+
+                // Normalize token metadata fields for schema drift.
+                // NOTE: TokenExpiresAtUtc may be null in older states; compute it based on issuedAt + TTL.
+                for (var idx = 0; idx < cleaned.Count; idx++)
+                {
+                    var device = cleaned[idx];
+                    var issuedAt = device.TokenIssuedAtUtc ?? device.PairedAtUtc;
+                    var expiresAt = device.TokenExpiresAtUtc ?? ComputeDeviceTokenExpiresAt(issuedAt);
+
+                    // Clamp expiry to revoke time if revoked.
+                    if (device.TokenRevokedAtUtc.HasValue && expiresAt > device.TokenRevokedAtUtc.Value)
+                    {
+                        expiresAt = device.TokenRevokedAtUtc.Value;
+                    }
+
+                    cleaned[idx] = device with { TokenIssuedAtUtc = issuedAt, TokenExpiresAtUtc = expiresAt };
                 }
 
                 _devicesByChildGuid[key] = cleaned;

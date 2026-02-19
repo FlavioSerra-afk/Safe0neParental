@@ -2663,7 +2663,9 @@ if (action === "unpairDevice") {
   const cid = childId || "";
   const deviceId = btn.getAttribute("data-deviceid") || "";
   if (!deviceId) return;
-  if (!confirm("Unpair this device?")) return;
+  if (!confirm("Unpair this device? This will remove the device from this child.")) return;
+  const phrase = (prompt("Type UNPAIR to confirm:") || "").trim().toUpperCase();
+  if (phrase !== "UNPAIR") return;
   if (!state?.api?.available || !window.Safe0neApi?.unpairDeviceLocal) return;
   Promise.resolve(window.Safe0neApi.unpairDeviceLocal(deviceId))
     .then(() => Promise.resolve(refreshDevicesFromApi(cid)))

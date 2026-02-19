@@ -55,12 +55,20 @@ public sealed partial class JsonFileControlPlane
                     var replacementHash = ComputeSha256Hex(replacementToken);
 
                     var prior = devices[idx];
-                    devices[idx] = new PairedDevice(
-                        DeviceId: prior.DeviceId,
-                        DeviceName: prior.DeviceName,
-                        AgentVersion: prior.AgentVersion,
-                        PairedAtUtc: prior.PairedAtUtc,
-                        TokenHashSha256: replacementHash);
+
+                    var now = DateTimeOffset.UtcNow;
+                    var expiresAt = prior.TokenExpiresAtUtc ?? now;
+                    if (expiresAt > now) expiresAt = now;
+
+                    // Keep record but invalidate the token and record revoke metadata.
+                    devices[idx] = prior with
+                    {
+                        TokenHashSha256 = replacementHash,
+                        TokenRevokedAtUtc = now,
+                        TokenRevokedBy = revokedBy,
+                        TokenRevokedReason = reason,
+                        TokenExpiresAtUtc = expiresAt
+                    };
 
                     revoked = true;
 

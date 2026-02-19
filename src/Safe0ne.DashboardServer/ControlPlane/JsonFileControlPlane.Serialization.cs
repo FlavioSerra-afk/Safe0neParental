@@ -220,6 +220,7 @@ public sealed partial class JsonFileControlPlane
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
         string TokenHashSha256,
+        DateTimeOffset? LastSeenUtc = null,
         DateTimeOffset? TokenIssuedAtUtc = null,
         DateTimeOffset? TokenExpiresAtUtc = null,
         DateTimeOffset? TokenRevokedAtUtc = null,

@@ -227,19 +227,22 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 return Array.Empty<ChildDeviceSummary>();
             }
 
-            DateTimeOffset? lastSeen = null;
+            DateTimeOffset? childLastSeen = null;
             if (_statusByChildGuid.TryGetValue(key, out var s))
             {
-                lastSeen = s.LastSeenUtc;
+                childLastSeen = s.LastSeenUtc;
             }
 
             var now = DateTimeOffset.UtcNow;
+            var singleDevice = devices.Count == 1;
 
             return devices
+                .OrderByDescending(d => d.PairedAtUtc)
                 .Select(d =>
                 {
                     var expired = IsDeviceTokenExpired(now, d.TokenExpiresAtUtc);
                     var revoked = d.TokenRevokedAtUtc.HasValue;
+                    var lastSeen = d.LastSeenUtc ?? (singleDevice ? childLastSeen : null);
                     return new ChildDeviceSummary(
                         DeviceId: d.DeviceId,
                         DeviceName: d.DeviceName,
@@ -254,6 +257,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                         TokenRevoked: revoked);
                 })
                 .ToList();
+
         }
     }
 
@@ -427,6 +431,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 AgentVersion: agentVersion,
                 PairedAtUtc: issuedAt,
                 TokenHashSha256: tokenHash,
+                LastSeenUtc: null,
                 TokenIssuedAtUtc: issuedAt,
                 TokenExpiresAtUtc: ComputeDeviceTokenExpiresAt(issuedAt),
                 TokenRevokedAtUtc: null,
@@ -448,6 +453,28 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
         lock (_gate)
         {
             var key = childId.Value.ToString();
+            // Device health: record per-device last seen when authenticated.
+            // Best-effort only; never throws.
+            if (authenticated && deviceId.HasValue)
+            {
+                try
+                {
+                    if (_devicesByChildGuid.TryGetValue(key, out var devs) && devs is not null && devs.Count > 0)
+                    {
+                        var idx = devs.FindIndex(d => d.DeviceId == deviceId.Value);
+                        if (idx >= 0)
+                        {
+                            var d = devs[idx];
+                            devs[idx] = d with { LastSeenUtc = DateTimeOffset.UtcNow };
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
 
             // K4: Store a privacy-first screen time summary for parent reporting.
             _policiesByChildGuid.TryGetValue(key, out var policy);
