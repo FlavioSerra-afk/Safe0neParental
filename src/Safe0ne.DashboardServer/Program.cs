@@ -858,7 +858,12 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
     var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
-    if (body is null || string.IsNullOrWhiteSpace(body.DisplayName))
+    // Canonical: DisplayName
+    // LEGACY-COMPAT: older callers used { name: "..." }
+    var displayName = body?.DisplayName;
+    if (string.IsNullOrWhiteSpace(displayName)) displayName = body?.Name;
+
+    if (body is null || string.IsNullOrWhiteSpace(displayName))
     {
         return Results.Json(
             new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
@@ -866,7 +871,7 @@ local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var created = cp.CreateChild(body.DisplayName);
+    var created = cp.CreateChild(displayName!);
 
     // Persist local UI metadata (gender/ageGroup/avatar) if provided.
     if (body.Gender is not null || body.AgeGroup is not null || body.Avatar is not null)
@@ -1691,6 +1696,38 @@ local.MapGet("/children/{childId:guid}/reports", (Guid childId, JsonFileControlP
 });
 
 local.MapPatch("/children/{childId:guid}/reports", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    JsonObject? patch;
+    try
+    {
+        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch
+    {
+        patch = null;
+    }
+
+    if (patch is null)
+    {
+        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Missing or invalid JSON body")), JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    Safe0ne.DashboardServer.Reports.ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
+
+    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+// LEGACY-COMPAT: older UI/tests used a dedicated schedule sub-route and PUT semantics.
+// Canonical is /reports (GET) and /reports (PATCH).
+// RemoveAfter: milestone_vNext_migrate_reports_schedule
+local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
 {
     JsonObject? patch;
     try

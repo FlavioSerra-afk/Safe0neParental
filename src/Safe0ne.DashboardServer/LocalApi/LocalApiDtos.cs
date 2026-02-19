@@ -7,7 +7,11 @@ public sealed record LocalAvatarCrop(double X, double Y, double Zoom);
 public sealed record LocalAvatar(string Kind, int? Id = null, string? DataUrl = null, LocalAvatarCrop? Crop = null);
 
 public sealed record CreateLocalChildRequest(
-    string DisplayName,
+    // Canonical: DisplayName
+    // LEGACY-COMPAT: accept older payloads that used { name: "..." }.
+    // RemoveAfter: milestone_vNext_migrate_local_children_create
+    string? DisplayName = null,
+    string? Name = null,
     string? Gender = null,
     string? AgeGroup = null,
     LocalAvatar? Avatar = null);
