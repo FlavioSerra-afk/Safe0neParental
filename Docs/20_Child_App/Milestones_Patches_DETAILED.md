@@ -193,8 +193,8 @@ Minimal child-facing UX: time left, next lock, block screens with reasons, emerg
 - Emergency access list (Always Allowed surfaced clearly)
 
 ### Acceptance tests
-- [ ] Child always knows what’s happening and next steps
-- [ ] No technical language on child screens
+- [x] Child always knows what’s happening and next steps
+- [x] No technical language on child screens
 
 ---
 

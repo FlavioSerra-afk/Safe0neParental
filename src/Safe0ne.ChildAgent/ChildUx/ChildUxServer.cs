@@ -5,7 +5,6 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Safe0ne.Shared.Contracts;
 using Safe0ne.ChildAgent.Requests;
-using Safe0ne.ChildAgent.Pairing;
 
 namespace Safe0ne.ChildAgent.ChildUx;
 
@@ -19,7 +18,6 @@ public sealed class ChildUxServer
     private readonly ChildStateStore _store;
     private readonly ILogger _logger;
     private readonly AccessRequestQueue _requests;
-    private readonly EnrollmentService _enrollment;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
@@ -303,6 +301,8 @@ public sealed class ChildUxServer
         var mode = eff?.EffectiveMode.ToString() ?? pol?.Mode.ToString() ?? "Unknown";
         var activeSchedule = eff?.ActiveSchedule ?? "None";
 
+        var friendly = ExplainBlockedReason(kind, reason, target);
+
         var title = kind switch
         {
             "web" => "Website blocked",
@@ -318,9 +318,14 @@ public sealed class ChildUxServer
         sb.Append($"<h1 style='margin:0 0 8px 0'>{WebUtility.HtmlEncode(title)}</h1>");
 
         if (!string.IsNullOrWhiteSpace(target))
-            sb.Append($"<div><b>Target:</b> {WebUtility.HtmlEncode(target)}</div>");
+            sb.Append($"<div><b>Blocked:</b> {WebUtility.HtmlEncode(target)}</div>");
+
+        if (!string.IsNullOrWhiteSpace(friendly.Why))
+            sb.Append($"<div class='muted' style='margin-top:6px'>{WebUtility.HtmlEncode(friendly.Why)}</div>");
+
+        // Keep raw reason for debugging / support links, but tuck it away.
         if (!string.IsNullOrWhiteSpace(reason))
-            sb.Append($"<div class='muted'><b>Reason:</b> {WebUtility.HtmlEncode(reason)}</div>");
+            sb.Append($"<div class='muted' style='margin-top:6px;font-size:12px'><b>Code:</b> {WebUtility.HtmlEncode(reason)}</div>");
 
         sb.Append($"<div style='margin-top:12px'><b>Mode:</b> {WebUtility.HtmlEncode(mode)} · <b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}</div>");
         sb.Append("<div class='muted' style='margin-top:8px'>If this seems wrong, ask a parent to review your rules. You can also send a request from this screen.</div>");
@@ -359,9 +364,93 @@ public sealed class ChildUxServer
 
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
 
+        if (!string.IsNullOrWhiteSpace(friendly.NextStep))
+        {
+            sb.Append($"<div class='muted' style='margin-top:12px'><b>Next step:</b> {WebUtility.HtmlEncode(friendly.NextStep)}</div>");
+        }
+
         sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a></div>");
         sb.Append("</div></body></html>");
         return sb.ToString();
+    }
+
+    private static (string Why, string NextStep) ExplainBlockedReason(string? kind, string? reason, string? target)
+    {
+        kind ??= string.Empty;
+        reason ??= string.Empty;
+
+        // Make the child-facing copy calm and simple. Keep it non-technical.
+        if (kind.Equals("time", StringComparison.OrdinalIgnoreCase))
+        {
+            return reason switch
+            {
+                "daily_budget" => (
+                    "You have used all of your time for today.",
+                    "Ask for more time or wait until tomorrow."
+                ),
+                "bedtime" => (
+                    "It’s currently bedtime.",
+                    "Wait until morning or ask a parent if you need an exception."
+                ),
+                _ => (
+                    "Time is limited right now.",
+                    "Ask a parent for more time if you need it."
+                )
+            };
+        }
+
+        if (kind.Equals("app", StringComparison.OrdinalIgnoreCase))
+        {
+            var what = string.IsNullOrWhiteSpace(target) ? "This app" : target;
+            return reason switch
+            {
+                "deny_list" => (
+                    $"{what} is not allowed.",
+                    "Ask a parent to unblock it."
+                ),
+                "allow_list" => (
+                    "Only approved apps are allowed right now.",
+                    "Ask a parent to approve this app."
+                ),
+                "per_app_limit" => (
+                    $"You have reached today’s time limit for {what}.",
+                    "Ask for more time or use a different app."
+                ),
+                "lockdown_default" => (
+                    "Apps are limited right now.",
+                    "Ask a parent for an exception."
+                ),
+                _ => (
+                    $"{what} is blocked right now.",
+                    "Ask a parent to review it."
+                )
+            };
+        }
+
+        if (kind.Equals("web", StringComparison.OrdinalIgnoreCase))
+        {
+            return reason switch
+            {
+                "category" => (
+                    "This website is in a blocked category.",
+                    "Ask a parent to unblock it if it’s needed."
+                ),
+                "blocked" => (
+                    "This website is blocked.",
+                    "Ask a parent to unblock it if it’s needed."
+                ),
+                _ => (
+                    "This website is blocked.",
+                    "Ask a parent to review it if you think it’s wrong."
+                )
+            };
+        }
+
+        // Unknown / legacy links.
+        return (
+            "Something is blocked right now.",
+            "Ask a parent if you need help."
+        );
     }
 
     private string RenderWarning(string query)
@@ -667,26 +756,16 @@ private string HandlePair(string query)
         return RenderSimpleMessage("Pair device", "Pairing code looks invalid. Please enter the 6-digit code from the Parent app.", "/pair", "Try again");
     }
 
-    var deviceName = string.IsNullOrWhiteSpace(name) ? Environment.MachineName : name.Trim();
-    var agentVersion = typeof(ChildUxServer).Assembly.GetName().Version?.ToString() ?? "ChildAgent";
+    // Store code in-process so HeartbeatWorker can use it (SAFEONE_PAIR_CODE).
+    // NOTE: ChildId is still resolved at agent startup. If the agent was launched for the wrong ChildId, restart after fixing config.
+    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", code);
 
-    // Perform enrollment immediately (canonical pairing path). This avoids reliance on environment variables and "next heartbeat" timing.
-    var result = _enrollment.EnrollByCodeAsync(code, deviceName, agentVersion, CancellationToken.None)
-        .GetAwaiter()
-        .GetResult();
-
-    if (!result.Ok)
+    if (!string.IsNullOrWhiteSpace(name))
     {
-        return RenderSimpleMessage("Pair device", $"Pairing failed: {WebUtility.HtmlEncode(result.Message)}", "/pair", "Try again");
+        Environment.SetEnvironmentVariable("SAFEONE_DEVICE_NAME", name.Trim());
     }
 
-    // Clear any queued pairing code to prevent repeated attempts.
-    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", null);
-    Environment.SetEnvironmentVariable("SAFEONE_DEVICE_NAME", null);
-
-    return RenderSimpleMessage("Paired ✅", "Device paired successfully. You can return to Today.", "/today", "Go to Today");
+    return RenderSimpleMessage("Pairing queued", "Pairing code saved. The agent will attempt pairing on its next heartbeat. Return to Today and wait for status to update.", "/today", "Go to Today");
 }
-
-
 
 }

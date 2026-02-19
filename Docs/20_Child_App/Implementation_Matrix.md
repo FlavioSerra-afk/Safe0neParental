@@ -39,7 +39,7 @@ Legend:
 | K-APP-002 | Agent | Per-app limits | Win✅ | 🟡 | PATCH_16S improves authoring; enforcement TBD. |
 | K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | 🟡 | PATCH_16T persists toggles; enforcement TBD. |
 | K-ALERT-001 | Agent | Telemetry → Alerts/Activity pipeline | Win✅ | ✅ | Geofence activity verified; other signals planned. |
-| K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | 🟡 | Planned UX baseline; ensure no-jargon. |
+| K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | 🟢 | Implemented: `/blocked` uses calm language + request links; `/today` shows status/time. |
 | K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Heartbeat is implemented; pairing hardening includes token revoke/expiry checks (16W20). Pairing deeplink handling is optional and planned for Kid UX (16W22 adds parent-side deeplink copy). Health enrichment remains ongoing. |
 | K-ANTITAMPER-001 | Agent | Anti-tamper stubs | Win✅ | 🟡 | Signals reported in heartbeat; parent alerting + policy gates implemented (16W15–16W17). Enforcement hardening still TBD. |
 
