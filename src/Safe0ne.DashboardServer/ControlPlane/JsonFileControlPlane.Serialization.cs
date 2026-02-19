@@ -46,6 +46,9 @@ public sealed partial class JsonFileControlPlane
                 _localActivityEventsJsonByChildGuid = (state.LocalActivityEvents ?? new List<LocalActivityEventsState>())
                     .ToDictionary(a => a.ChildId.Value.ToString(), a => a.EventsJson, StringComparer.OrdinalIgnoreCase);
 
+                _localAuditEntriesJsonByChildGuid = (state.LocalAuditEntries ?? new List<LocalAuditEntriesState>())
+                    .ToDictionary(a => a.ChildId.Value.ToString(), a => a.EntriesJson, StringComparer.OrdinalIgnoreCase);
+
                 _localLastLocationJsonByChildGuid = (state.LocalLocations ?? new List<LocalLocationState>())
                     .ToDictionary(a => a.ChildId.Value.ToString(), a => a.LocationJson, StringComparer.OrdinalIgnoreCase);
 
@@ -133,6 +136,7 @@ public sealed partial class JsonFileControlPlane
         _diagnosticsByChildGuid = new Dictionary<string, DiagnosticsBundleInfo>(StringComparer.OrdinalIgnoreCase);
 
         _localLastLocationJsonByChildGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _localAuditEntriesJsonByChildGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         _requests = new List<AccessRequest>();
         _grants = new List<Grant>();
@@ -162,6 +166,7 @@ public sealed partial class JsonFileControlPlane
             LocalChildMeta: _localChildMetaJsonByChildGuid.Select(kvp => new LocalChildMetaState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalSettingsProfiles: _localSettingsProfileJsonByChildGuid.Select(kvp => new LocalSettingsProfileState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalActivityEvents: _localActivityEventsJsonByChildGuid.Select(kvp => new LocalActivityEventsState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
+            LocalAuditEntries: _localAuditEntriesJsonByChildGuid.Select(kvp => new LocalAuditEntriesState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             LocalLocations: _localLastLocationJsonByChildGuid.Select(kvp => new LocalLocationState(new ChildId(Guid.Parse(kvp.Key)), kvp.Value)).ToList(),
             SchemaVersion: CurrentSchemaVersion
         );
@@ -248,6 +253,10 @@ public sealed partial class JsonFileControlPlane
         ChildId ChildId,
         string EventsJson);
 
+    private sealed record LocalAuditEntriesState(
+        ChildId ChildId,
+        string EntriesJson);
+
     private sealed record ChildCommandsState(
         ChildId ChildId,
         List<ChildCommand> Commands);
@@ -269,6 +278,7 @@ public sealed partial class JsonFileControlPlane
         List<LocalChildMetaState>? LocalChildMeta = null,
         List<LocalSettingsProfileState>? LocalSettingsProfiles = null,
         List<LocalActivityEventsState>? LocalActivityEvents = null,
+        List<LocalAuditEntriesState>? LocalAuditEntries = null,
         List<LocalLocationState>? LocalLocations = null,
         int SchemaVersion = CurrentSchemaVersion);
 

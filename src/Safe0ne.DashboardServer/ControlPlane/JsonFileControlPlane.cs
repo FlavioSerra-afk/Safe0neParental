@@ -28,7 +28,7 @@ public sealed partial class JsonFileControlPlane
         public DateTimeOffset? ArchivedAt => ArchivedAtUtc;
     }
 
-private const int CurrentSchemaVersion = 2;
+private const int CurrentSchemaVersion = 3;
     private const int MinSupportedSchemaVersion = 1;
 
 

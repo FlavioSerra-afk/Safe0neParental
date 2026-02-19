@@ -1535,7 +1535,8 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = (childId is { } cid ? (Guid?)cid.Value : null) }, null), JsonDefaults.Options);
+	// NOTE: avoid naming pattern variables 'cid' because it can conflict with later locals in this lambda scope.
+	return Results.Json(new ApiResponse<object>(new { ok = true, childId = (childId is { } childIdVal ? (Guid?)childIdVal.Value : null) }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
