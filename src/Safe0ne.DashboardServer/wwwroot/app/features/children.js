@@ -414,6 +414,9 @@ function renderPerAppLimitsCard(child, profile) {
       .so-gender-female{background:#ffe4ea;color:#be185d}
       .so-gender-unspec{background:#e2e8f0;color:#334155}
       .so-pill{border-radius:999px;padding:8px 12px;font-weight:900;border:1px solid rgba(148,163,184,.35);background:#fff}
+      .so-pill--success{border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.12);color:#14532d}
+      .so-pill--warning{border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.12);color:#92400e}
+      .so-pill--muted{border-color:rgba(148,163,184,.35);background:rgba(148,163,184,.10);color:#334155}
       .so-badges{display:flex;gap:10px;flex-wrap:wrap}
       /* modal */
       .so-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}
@@ -484,6 +487,7 @@ function renderPerAppLimitsCard(child, profile) {
         <div class="so-badges">
           <span class="so-pill ${g.cls}"><span class="so-gender-symbol">${g.symbol}</span>&nbsp;${g.label}</span>
           <span class="so-pill">${escapeHtml(age)}</span>
+          <span class="so-pill so-pill--muted" data-role="agent" data-childid="${escapeHtml(child.id)}">Protection: …</span>
         </div>
       </div>
     </div>`;
@@ -491,6 +495,7 @@ function renderPerAppLimitsCard(child, profile) {
 
   function renderChildren() {
     scheduleChildrenRefresh();
+    scheduleStatusBadgesRefresh();
     const children = getChildren();
     return `<div class="page">
       <div class="page-title">Children</div>
@@ -1771,7 +1776,7 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
   const state = {
     draft: null,
     showArchived: readBool(LS_SHOW_ARCHIVED, false),
-    api: { available: false, children: null, inFlight: false, saveFailedByChildId: {}, devicesByChildId: {}, pairingByChildId: {}, devicesInFlight: {}, pairingInFlight: {}, activityInFlight: {}, locationInFlight: {} },
+    api: { available: false, children: null, inFlight: false, saveFailedByChildId: {}, devicesByChildId: {}, pairingByChildId: {}, statusByChildId: {}, statusInFlight: {}, devicesInFlight: {}, pairingInFlight: {}, activityInFlight: {}, locationInFlight: {} },
     profilesLoaded: {},
     devicesLoaded: {},
     activityLoaded: {},
@@ -1792,9 +1797,92 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
     const grid = document.getElementById("children-grid");
     if (!grid) return;
     grid.innerHTML = getChildren().map(card).join("");
+    scheduleStatusBadgesRefresh();
   }
 
-  function scheduleChildrenRefresh() {
+  
+  function scheduleStatusBadgesRefresh(){
+    // Best-effort, silent.
+    setTimeout(() => {
+      try{ refreshAllStatusBadges(); }catch(_){ }
+    }, 0);
+  }
+
+  function setStatusPill(childId, text, cls){
+    const id = String(childId || '');
+    const el = document.querySelector(`span[data-role="agent"][data-childid="${cssEscape(id)}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `so-pill ${cls || 'so-pill--muted'}`;
+  }
+
+  function parseUtcMs(v){
+    if (!v || typeof v !== 'string') return NaN;
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? ms : NaN;
+  }
+
+  async function refreshStatusFromApi(childId){
+    const id = String(childId || '');
+    if (!isGuid(id)) return false;
+    const api = window.Safe0neApi;
+    if (!api || typeof api.getChildStatus !== 'function') return false;
+    if (state.api.statusInFlight[id]) return false;
+    state.api.statusInFlight[id] = true;
+    try{
+      const res = await api.getChildStatus(id);
+      if (res && res.ok && res.data){
+        state.api.statusByChildId[id] = res.data;
+        return true;
+      }
+      // Treat missing/unknown status as "never seen".
+      state.api.statusByChildId[id] = null;
+      return false;
+    }catch{
+      return false;
+    }finally{
+      state.api.statusInFlight[id] = false;
+    }
+  }
+
+  async function refreshAllStatusBadges(){
+    const cards = Array.from(document.querySelectorAll('.so-child-card[data-childid]'));
+    if (!cards.length) return;
+    const OFFLINE_AFTER_MS = 3 * 60 * 1000;
+
+    for (const c of cards){
+      const id = String(c.getAttribute('data-childid') || '');
+      if (!isGuid(id)) continue;
+
+      // Cached status is either object, null (never seen), or undefined (not fetched yet).
+      let st = state.api.statusByChildId[id];
+      if (st === undefined){
+        setStatusPill(id, 'Protection: …', 'so-pill--muted');
+        await refreshStatusFromApi(id);
+        st = state.api.statusByChildId[id];
+      }
+
+      if (!st){
+        setStatusPill(id, 'Protection: Never seen', 'so-pill--muted');
+        continue;
+      }
+
+      const last = parseUtcMs(st.lastHeartbeatUtc) || parseUtcMs(st.lastSeenUtc);
+      if (!Number.isFinite(last)){
+        setStatusPill(id, 'Protection: Unknown', 'so-pill--muted');
+        continue;
+      }
+
+      const ageMs = Date.now() - last;
+      if (ageMs <= OFFLINE_AFTER_MS){
+        setStatusPill(id, 'Protection: Online', 'so-pill--success');
+      } else {
+        setStatusPill(id, 'Protection: Offline', 'so-pill--warning');
+      }
+    }
+  }
+
+function scheduleChildrenRefresh() {
     if (state.refreshScheduled) return;
     state.refreshScheduled = true;
     // Router safety: schedule async work after synchronous render

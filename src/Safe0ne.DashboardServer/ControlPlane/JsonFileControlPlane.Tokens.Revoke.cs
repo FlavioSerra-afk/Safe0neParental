@@ -6,6 +6,7 @@
 
 #nullable enable
 using System;
+using System.Linq;
 using Safe0ne.Shared.Contracts;
 
 namespace Safe0ne.DashboardServer.ControlPlane;
@@ -48,17 +49,18 @@ public sealed partial class JsonFileControlPlane
                     if (idx < 0) continue;
 
                     // Invalidate token without deleting the device.
-                    // We do not currently persist explicit revoke metadata (RevokedBy/Reason) to avoid schema churn.
-                    var newToken = GenerateDeviceToken();
-                    var newHash = ComputeSha256Hex(newToken);
+                    // NOTE: we intentionally do not persist extra revoke metadata here to avoid schema churn
+                    // in the current snapshot format.
+                    var replacementToken = GenerateDeviceToken();
+                    var replacementHash = ComputeSha256Hex(replacementToken);
 
-                    var existing = devices[idx];
+                    var prior = devices[idx];
                     devices[idx] = new PairedDevice(
-                        DeviceId: existing.DeviceId,
-                        DeviceName: existing.DeviceName,
-                        AgentVersion: existing.AgentVersion,
-                        PairedAtUtc: existing.PairedAtUtc,
-                        TokenHashSha256: newHash);
+                        DeviceId: prior.DeviceId,
+                        DeviceName: prior.DeviceName,
+                        AgentVersion: prior.AgentVersion,
+                        PairedAtUtc: prior.PairedAtUtc,
+                        TokenHashSha256: replacementHash);
 
                     revoked = true;
 

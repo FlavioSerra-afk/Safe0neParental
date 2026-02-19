@@ -60,7 +60,9 @@ public sealed partial class JsonFileControlPlane
                     .ToDictionary(
                         d => d.ChildId.Value.ToString(),
                         d => d.Devices,
-                        StringComparer.OrdinalIgnoreCase);
+                         StringComparer.OrdinalIgnoreCase);
+
+                NormalizePairedDevicesUnsafe_NoLock();
 
                 _pendingPairingByChildGuid = (state.PendingPairings ?? new List<PendingPairing>())
                     .Where(p => p.ExpiresAtUtc > DateTimeOffset.UtcNow)
@@ -212,7 +214,12 @@ public sealed partial class JsonFileControlPlane
         string DeviceName,
         string AgentVersion,
         DateTimeOffset PairedAtUtc,
-        string TokenHashSha256);
+        string TokenHashSha256,
+        DateTimeOffset? TokenIssuedAtUtc = null,
+        DateTimeOffset? TokenExpiresAtUtc = null,
+        DateTimeOffset? TokenRevokedAtUtc = null,
+        string? TokenRevokedBy = null,
+        string? TokenRevokedReason = null);
 
     private sealed record PendingPairing(
         ChildId ChildId,

@@ -233,13 +233,26 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 lastSeen = s.LastSeenUtc;
             }
 
+            var now = DateTimeOffset.UtcNow;
+
             return devices
-                .Select(d => new ChildDeviceSummary(
-                    DeviceId: d.DeviceId,
-                    DeviceName: d.DeviceName,
-                    AgentVersion: d.AgentVersion,
-                    PairedAtUtc: d.PairedAtUtc,
-                    LastSeenUtc: lastSeen))
+                .Select(d =>
+                {
+                    var expired = IsDeviceTokenExpired(now, d.TokenExpiresAtUtc);
+                    var revoked = d.TokenRevokedAtUtc.HasValue;
+                    return new ChildDeviceSummary(
+                        DeviceId: d.DeviceId,
+                        DeviceName: d.DeviceName,
+                        AgentVersion: d.AgentVersion,
+                        PairedAtUtc: d.PairedAtUtc,
+                        LastSeenUtc: lastSeen,
+                        TokenIssuedAtUtc: d.TokenIssuedAtUtc,
+                        TokenExpiresAtUtc: d.TokenExpiresAtUtc,
+                        TokenRevokedAtUtc: d.TokenRevokedAtUtc,
+                        TokenRevokedBy: d.TokenRevokedBy,
+                        TokenExpired: expired,
+                        TokenRevoked: revoked);
+                })
                 .ToList();
         }
     }
@@ -267,6 +280,16 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             var hash = ComputeSha256Hex(token);
             var match = devices.FirstOrDefault(d => string.Equals(d.TokenHashSha256, hash, StringComparison.OrdinalIgnoreCase));
             if (match is null)
+            {
+                return false;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (match.TokenRevokedAtUtc.HasValue)
+            {
+                return false;
+            }
+            if (IsDeviceTokenExpired(now, match.TokenExpiresAtUtc))
             {
                 return false;
             }
@@ -396,12 +419,19 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 deviceId = Guid.NewGuid();
             }
 
+            var issuedAt = DateTimeOffset.UtcNow;
+
             devices.Add(new PairedDevice(
                 DeviceId: deviceId,
                 DeviceName: deviceName,
                 AgentVersion: agentVersion,
-                PairedAtUtc: DateTimeOffset.UtcNow,
-                TokenHashSha256: tokenHash));
+                PairedAtUtc: issuedAt,
+                TokenHashSha256: tokenHash,
+                TokenIssuedAtUtc: issuedAt,
+                TokenExpiresAtUtc: ComputeDeviceTokenExpiresAt(issuedAt),
+                TokenRevokedAtUtc: null,
+                TokenRevokedBy: null,
+                TokenRevokedReason: null));
 
             // One-time code is consumed.
             _pendingPairingByChildGuid.Remove(key);
@@ -409,7 +439,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             EnsureChildProfileUnsafe_NoLock(childId);
             PersistUnsafe_NoLock();
 
-            return new PairingCompleteResponse(childId, deviceId, token, DateTimeOffset.UtcNow);
+            return new PairingCompleteResponse(childId, deviceId, token, issuedAt);
         }
     }
 

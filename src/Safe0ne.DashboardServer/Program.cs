@@ -102,14 +102,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid chil
     return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
 });
 
-// LEGACY-COMPAT: Some older UI builds (or cached assets) accidentally called a malformed v1 status route
-// of the form /api/v1/childre_<id>/status (missing the "n/" segment and prepending an underscore).
-// Rather than spamming the console with 404s, we respond 200 with an application-level error.
-// RemoveAfter: when /Docs/00_Shared/Legacy-Code-Registry.md marks this surface unused.
+// LEGACY-COMPAT: Some older/cached UI builds called a malformed status route of the form:
+//   /api/v1/childre_<id>/status
+// where <id> was not a GUID and the segment was missing "children/".
+//
+// This shim prevents repeated 404 spam in embedded WebView caches and is safe because it
+// returns an explicit ApiError while still using HTTP 200 for compatibility.
+// RemoveAfter: UI-Cache-Bust-Rollout | Tracking: Docs/00_Shared/Legacy-Code-Registry.md
 app.MapGet($"/api/{ApiVersions.V1}/childre_{{id}}/status", (string id) =>
 {
     return Results.Json(
-        new ApiResponse<ChildAgentStatus>(null, new ApiError("legacy_route", "Use /api/v1/children/{childId}/status")),
+        new ApiResponse<ChildAgentStatus>(null, new ApiError("legacy_route", "Legacy status route is deprecated", id)),
         JsonDefaults.Options);
 });
 
