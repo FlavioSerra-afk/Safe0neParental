@@ -181,6 +181,9 @@ public sealed class ChildUxServer
         var pol = snap.Policy;
         var st = snap.ScreenTime;
 
+        var currentChildId = AgentAuthStore.LoadCurrentChildId();
+        var auth = currentChildId is null ? null : AgentAuthStore.LoadAuth(currentChildId.Value);
+
         var now = DateTimeOffset.Now;
         var nextChange = ScheduleHelper.GetNextChange(now, pol);
 
@@ -198,35 +201,58 @@ public sealed class ChildUxServer
         sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .grid{max-width:860px;display:grid;gap:12px;} .card{border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} ul{margin:8px 0 0 20px;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;}</style>");
         sb.Append("</head><body><div class='grid'>");
         sb.Append("<div class='card'><h1 style='margin:0'>Today</h1><div class='muted'>This is a local page on this device.</div></div>");
-        // Pairing status (K7+): derived from the agent's local auth cache.
-        var currentChildId = AgentAuthStore.LoadCurrentChildId();
-        AgentAuthStore.AgentAuthState? auth = null;
-        if (currentChildId is not null)
-        {
-            auth = AgentAuthStore.LoadAuth(currentChildId.Value);
-        }
 
-        var pairedLabel = currentChildId is null ? "Not paired" : "Paired";
-        var childIdLabel = currentChildId is null ? "(none)" : currentChildId.Value.Value.ToString();
-        var deviceIdLabel = auth is null ? "(unknown)" : auth.DeviceId.ToString();
-        var tokenAgeLabel = auth is null ? "(unknown)" : $"{Math.Max(0, (int)(DateTimeOffset.UtcNow - auth.IssuedAtUtc).TotalDays)} days";
-
+        // Pairing + local auth cache status.
         sb.Append("<div class='card'>");
         sb.Append("<h2 style='margin:0 0 8px 0'>Pairing</h2>");
-        sb.Append($"<div><b>Status:</b> {WebUtility.HtmlEncode(pairedLabel)}</div>");
-        sb.Append($"<div class='muted'><b>Child ID:</b> {WebUtility.HtmlEncode(childIdLabel)}</div>");
-        sb.Append($"<div class='muted'><b>Device ID:</b> {WebUtility.HtmlEncode(deviceIdLabel)}</div>");
-        sb.Append($"<div class='muted'><b>Token age:</b> {WebUtility.HtmlEncode(tokenAgeLabel)}</div>");
         if (currentChildId is null)
         {
-            sb.Append("<div style='margin-top:10px'>To start, ask a parent for a pairing code.</div>");
+            sb.Append("<div><b>Status:</b> Not paired</div>");
+            sb.Append("<div class='muted' style='margin-top:6px'>Ask a parent to pair this device, then enter the 6-digit code.</div>");
+            sb.Append("<div style='margin-top:10px'><a href='/pair'>Pair this device</a></div>");
         }
-        sb.Append("<div style='margin-top:10px'><a href='/pair'>Open pairing page</a></div>");
+        else
+        {
+            sb.Append("<div><b>Status:</b> Paired</div>");
+            sb.Append($"<div class='muted'><b>Child ID:</b> {WebUtility.HtmlEncode(currentChildId.Value.Value.ToString())}</div>");
+            if (auth is null)
+            {
+                sb.Append("<div class='muted' style='margin-top:6px'>Token not issued yet (waiting for next heartbeat/pairing sync).</div>");
+            }
+            else
+            {
+                sb.Append($"<div class='muted' style='margin-top:6px'><b>Device:</b> {WebUtility.HtmlEncode(auth.DeviceId.ToString())}</div>");
+                sb.Append($"<div class='muted'><b>Token issued:</b> {WebUtility.HtmlEncode(auth.IssuedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
+            }
+        }
         sb.Append("</div>");
-
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Screen time</h2><div><b>Remaining:</b> {WebUtility.HtmlEncode(limitLabel)}</div><div class='muted'><b>Used:</b> {WebUtility.HtmlEncode(usedLabel)}</div>");
+        sb.Append("</div>");
+
+        sb.Append("<div class='card'>");
+        sb.Append("<h2 style='margin:0 0 8px 0'>Policy</h2>");
+        if (pol is null)
+        {
+            sb.Append("<div><b>Status:</b> No policy received yet</div>");
+            sb.Append("<div class='muted' style='margin-top:6px'>This usually resolves after pairing and the next sync.</div>");
+        }
+        else
+        {
+            sb.Append($"<div><b>Version:</b> {WebUtility.HtmlEncode(pol.Version)}</div>");
+            sb.Append($"<div class='muted'><b>Updated:</b> {WebUtility.HtmlEncode(pol.UpdatedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
+        }
+
+        if (eff is not null)
+        {
+            var evalAge = now - eff.EvaluatedAtUtc;
+            sb.Append($"<div class='muted' style='margin-top:6px'><b>Last evaluation:</b> {WebUtility.HtmlEncode(eff.EvaluatedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
+            if (evalAge > TimeSpan.FromMinutes(10))
+            {
+                sb.Append($"<div class='muted'>May be offline (last evaluation {WebUtility.HtmlEncode(((int)evalAge.TotalMinutes).ToString())} min ago)</div>");
+            }
+        }
         sb.Append("</div>");
 
         sb.Append("<div class='card'>");
@@ -327,8 +353,6 @@ public sealed class ChildUxServer
         var mode = eff?.EffectiveMode.ToString() ?? pol?.Mode.ToString() ?? "Unknown";
         var activeSchedule = eff?.ActiveSchedule ?? "None";
 
-        var friendly = ExplainBlockedReason(kind, reason, target);
-
         var title = kind switch
         {
             "web" => "Website blocked",
@@ -344,14 +368,9 @@ public sealed class ChildUxServer
         sb.Append($"<h1 style='margin:0 0 8px 0'>{WebUtility.HtmlEncode(title)}</h1>");
 
         if (!string.IsNullOrWhiteSpace(target))
-            sb.Append($"<div><b>Blocked:</b> {WebUtility.HtmlEncode(target)}</div>");
-
-        if (!string.IsNullOrWhiteSpace(friendly.Why))
-            sb.Append($"<div class='muted' style='margin-top:6px'>{WebUtility.HtmlEncode(friendly.Why)}</div>");
-
-        // Keep raw reason for debugging / support links, but tuck it away.
+            sb.Append($"<div><b>Target:</b> {WebUtility.HtmlEncode(target)}</div>");
         if (!string.IsNullOrWhiteSpace(reason))
-            sb.Append($"<div class='muted' style='margin-top:6px;font-size:12px'><b>Code:</b> {WebUtility.HtmlEncode(reason)}</div>");
+            sb.Append($"<div class='muted'><b>Reason:</b> {WebUtility.HtmlEncode(reason)}</div>");
 
         sb.Append($"<div style='margin-top:12px'><b>Mode:</b> {WebUtility.HtmlEncode(mode)} · <b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}</div>");
         sb.Append("<div class='muted' style='margin-top:8px'>If this seems wrong, ask a parent to review your rules. You can also send a request from this screen.</div>");
@@ -390,93 +409,9 @@ public sealed class ChildUxServer
 
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
 
-        if (!string.IsNullOrWhiteSpace(friendly.NextStep))
-        {
-            sb.Append($"<div class='muted' style='margin-top:12px'><b>Next step:</b> {WebUtility.HtmlEncode(friendly.NextStep)}</div>");
-        }
-
         sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a></div>");
         sb.Append("</div></body></html>");
         return sb.ToString();
-    }
-
-    private static (string Why, string NextStep) ExplainBlockedReason(string? kind, string? reason, string? target)
-    {
-        kind ??= string.Empty;
-        reason ??= string.Empty;
-
-        // Make the child-facing copy calm and simple. Keep it non-technical.
-        if (kind.Equals("time", StringComparison.OrdinalIgnoreCase))
-        {
-            return reason switch
-            {
-                "daily_budget" => (
-                    "You have used all of your time for today.",
-                    "Ask for more time or wait until tomorrow."
-                ),
-                "bedtime" => (
-                    "It’s currently bedtime.",
-                    "Wait until morning or ask a parent if you need an exception."
-                ),
-                _ => (
-                    "Time is limited right now.",
-                    "Ask a parent for more time if you need it."
-                )
-            };
-        }
-
-        if (kind.Equals("app", StringComparison.OrdinalIgnoreCase))
-        {
-            var what = string.IsNullOrWhiteSpace(target) ? "This app" : target;
-            return reason switch
-            {
-                "deny_list" => (
-                    $"{what} is not allowed.",
-                    "Ask a parent to unblock it."
-                ),
-                "allow_list" => (
-                    "Only approved apps are allowed right now.",
-                    "Ask a parent to approve this app."
-                ),
-                "per_app_limit" => (
-                    $"You have reached today’s time limit for {what}.",
-                    "Ask for more time or use a different app."
-                ),
-                "lockdown_default" => (
-                    "Apps are limited right now.",
-                    "Ask a parent for an exception."
-                ),
-                _ => (
-                    $"{what} is blocked right now.",
-                    "Ask a parent to review it."
-                )
-            };
-        }
-
-        if (kind.Equals("web", StringComparison.OrdinalIgnoreCase))
-        {
-            return reason switch
-            {
-                "category" => (
-                    "This website is in a blocked category.",
-                    "Ask a parent to unblock it if it’s needed."
-                ),
-                "blocked" => (
-                    "This website is blocked.",
-                    "Ask a parent to unblock it if it’s needed."
-                ),
-                _ => (
-                    "This website is blocked.",
-                    "Ask a parent to review it if you think it’s wrong."
-                )
-            };
-        }
-
-        // Unknown / legacy links.
-        return (
-            "Something is blocked right now.",
-            "Ask a parent if you need help."
-        );
     }
 
     private string RenderWarning(string query)

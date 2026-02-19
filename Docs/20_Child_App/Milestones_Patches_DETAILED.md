@@ -186,6 +186,7 @@ Minimal child-facing UX: time left, next lock, block screens with reasons, emerg
   - Time remaining
   - Next schedule change
   - Current mode
+  - Pairing status + policy version/updated + last evaluation timestamp (local visibility)
 - Block screens:
   - What’s blocked
   - Why it’s blocked
@@ -193,8 +194,8 @@ Minimal child-facing UX: time left, next lock, block screens with reasons, emerg
 - Emergency access list (Always Allowed surfaced clearly)
 
 ### Acceptance tests
-- [x] Child always knows what’s happening and next steps
-- [x] No technical language on child screens
+- [ ] Child always knows what’s happening and next steps
+- [ ] No technical language on child screens
 
 ---
 

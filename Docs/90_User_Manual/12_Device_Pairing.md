@@ -24,6 +24,9 @@ When a pairing session is active, the Devices tab also shows an optional **pairi
 
 If successful, the Kid agent receives a **device token** and persists it so future heartbeats authenticate.
 
+### Verify pairing on the Kid device
+After pairing, the Kid UX **/today** page shows the current **Pairing status**, **token issued time**, and the latest **policy version** applied.
+
 ## Device token expiry
 Device tokens have a time-to-live (TTL). When a token expires, the Kid device will show as **Unauthorized** until you re-pair.
 
