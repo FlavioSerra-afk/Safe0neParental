@@ -1,13 +1,9 @@
-// LEGACY-COMPAT: Temporary placeholder to avoid duplicate Activity members during CP01 refactor rollback.
-// RemoveAfter: CP01 re-attempt with verified partial extraction.
-// Tracking: Docs/00_Shared/Legacy-Code-Registry.md#controlplane-partials
-
 namespace Safe0ne.DashboardServer.ControlPlane;
 
-/// <summary>
-/// Activity logic currently lives in JsonFileControlPlane.cs (canonical).
-/// This file intentionally contains no members to avoid duplicate definitions.
-/// </summary>
-public partial class JsonFileControlPlane
+public sealed partial class JsonFileControlPlane
 {
+    // LEGACY-COMPAT: Stub partial to keep file reserved for future domain extraction.
+    // Canonical members remain in JsonFileControlPlane.cs (and other active partials).
+    // RemoveAfter: CP01 domain extraction completes for this area.
+    // Tracking: Docs/00_Shared/ADRs/ADR-0004-ControlPlane-Partials-By-Domain.md
 }

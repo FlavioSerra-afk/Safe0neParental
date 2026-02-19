@@ -57,3 +57,17 @@ Planned next extractions (no API signature changes):
 * Improved readability and lower merge conflict risk.
 * More files, but easier navigation and safer refactors.
 * Migration must be incremental—avoid “big bang” rewrites.
+
+
+## Implementation status
+
+
+### CP01-A (completed)
+- Extracted persistence/serialization implementation from `JsonFileControlPlane.cs` into `JsonFileControlPlane.Serialization.cs`.
+- Left endpoint/public surface methods in-place (no signature changes).
+- Reserved domain partials (`Children`, `Requests`, `Alerts`, `Activity`) as stubs for future extraction.
+
+**Files**
+- `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Serialization.cs` (new, active)
+- `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.cs` (reduced; delegates to Serialization partial)
+- `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.{Children,Requests,Alerts,Activity}.cs` (stubs)
