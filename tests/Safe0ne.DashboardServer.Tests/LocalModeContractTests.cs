@@ -316,4 +316,60 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         Assert.Contains("\"events\"", expJson);
         Assert.Contains("unit_test", expJson);
     }
+
+
+    [Fact]
+    public async Task LocalPolicySync_Watchdog_SetsOverdue_WhenMismatchBeyondThreshold()
+    {
+        // For this test we force the watchdog threshold to 0 seconds so overdue becomes immediate.
+        Environment.SetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS", "0");
+
+        using var client = _factory.CreateClient();
+
+        // Create a child in local mode.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Watchdog Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // Fetch current policy envelope to obtain the current configured version and policy payload.
+        var polGet = await client.GetAsync($"/api/local/children/{childId}/policy");
+        Assert.Equal(HttpStatusCode.OK, polGet.StatusCode);
+
+        using var polDoc = JsonDocument.Parse(await polGet.Content.ReadAsStringAsync());
+        var currentVersion = polDoc.RootElement.GetProperty("data").GetProperty("policyVersion").GetInt64();
+        var policyJson = polDoc.RootElement.GetProperty("data").GetProperty("policy").GetRawText();
+
+        // Save policy again to bump the configured version.
+        var putBody = JsonContent.Create(new { policy = JsonDocument.Parse(policyJson).RootElement });
+        var polPut = await client.PutAsync($"/api/local/children/{childId}/policy", putBody);
+        Assert.Equal(HttpStatusCode.OK, polPut.StatusCode);
+
+        // Heartbeat reports it only applied the previous version.
+        var hb = await client.PostAsJsonAsync($"/api/v1/children/{childId}/heartbeat", new
+        {
+            deviceName = "TestDevice",
+            agentVersion = "test",
+            sentAtUtc = DateTimeOffset.UtcNow,
+            lastAppliedPolicyVersion = currentVersion
+        });
+        Assert.Equal(HttpStatusCode.OK, hb.StatusCode);
+
+        using var hbDoc = JsonDocument.Parse(await hb.Content.ReadAsStringAsync());
+        var data = hbDoc.RootElement.GetProperty("data");
+
+        Assert.True(data.TryGetProperty("policyApplyOverdue", out var overdueProp));
+        Assert.True(overdueProp.GetBoolean());
+
+        Assert.True(data.TryGetProperty("policyApplyState", out var stateProp));
+        Assert.Equal("overdue", stateProp.GetString());
+
+        Assert.True(data.TryGetProperty("policyApplyPendingSinceUtc", out var pendingProp));
+        Assert.Equal(JsonValueKind.String, pendingProp.ValueKind);
+
+        // Cleanup env var to avoid bleeding into other tests.
+        Environment.SetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS", null);
+    }
 }

@@ -202,7 +202,11 @@ public sealed record ChildAgentStatus(
     DateTimeOffset? PolicyApplyPendingSinceUtc = null,
     bool PolicyApplyOverdue = false,
     string? PolicyApplyState = null,
-    long? LastKnownGoodPolicyVersion = null
+    long? LastKnownGoodPolicyVersion = null,
+    // 26W08: server-side rollback recommendation (additive, backward-compatible)
+    long? RecommendedRollbackPolicyVersion = null,
+    string? RecommendedRollbackReason = null,
+    DateTimeOffset? RecommendedRollbackGeneratedAtUtc = null
 );
 
 /// <summary>

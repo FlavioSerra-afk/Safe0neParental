@@ -259,9 +259,39 @@ app.MapPost($"/api/{ApiVersions.V1}/children/{{childId:guid}}/heartbeat", async 
             statusCode: StatusCodes.Status404NotFound);
     }
 
+    // 16W21: Local-mode policy version watchdog.
+    // The local UI persists "policyVersion" under the Local Settings Profile (SSOT).
+    // Heartbeats should compare agent last-applied vs the *configured* local policy version
+    // when present, otherwise fall back to the canonical ChildPolicy version.
+    long? localConfiguredPolicyVersion = null;
+    try
+    {
+        var profileJson = cp.GetOrCreateLocalSettingsProfileJson(id);
+        var node = JsonNode.Parse(profileJson) as JsonObject;
+        if (node is not null
+            && node.TryGetPropertyValue("policyVersion", out var pvNode)
+            && pvNode is JsonValue)
+        {
+            // Stored as an int in the JSON profile.
+            localConfiguredPolicyVersion = pvNode.GetValue<long>();
+        }
+    }
+    catch
+    {
+        // best effort
+        localConfiguredPolicyVersion = null;
+    }
+
     // The control plane computes the effective state at receipt time.
     var now = DateTimeOffset.UtcNow;
     var effective = PolicyEvaluator.Evaluate(policy, now);
+
+    if (localConfiguredPolicyVersion is not null && localConfiguredPolicyVersion.Value > 0)
+    {
+        // Override the policy version only (keep evaluated mode/settings from the canonical policy
+        // until Local Mode becomes a fully separate policy plane).
+        effective = effective with { PolicyVersion = new PolicyVersion(localConfiguredPolicyVersion.Value) };
+    }
 
     // K8/P11: attach active grants.
     var activeGrants = cp.GetActiveGrants(id, now).ToArray();

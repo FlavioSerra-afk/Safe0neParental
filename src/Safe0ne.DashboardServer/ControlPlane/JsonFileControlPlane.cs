@@ -560,6 +560,51 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             }
             catch { }
 
+
+            // 16W19/16W21: policy sync observability + watchdog (server-side best effort).
+            var configuredPolicyVersion = effective.PolicyVersion.Value;
+            var lastAppliedPolicyVersion = req.LastAppliedPolicyVersion;
+
+            DateTimeOffset? pendingSinceUtc = null;
+            var overdue = false;
+            string? applyState = null;
+
+            if (lastAppliedPolicyVersion is null || lastAppliedPolicyVersion.Value < configuredPolicyVersion)
+            {
+                pendingSinceUtc = policy?.UpdatedAtUtc ?? DateTimeOffset.UtcNow;
+                var threshold = GetPolicyWatchdogThresholdUnsafe_NoLock();
+                if (threshold <= TimeSpan.Zero)
+                {
+                    overdue = true;
+                }
+                else
+                {
+                    var age = DateTimeOffset.UtcNow - pendingSinceUtc.Value;
+                    overdue = age >= threshold;
+                }
+                applyState = overdue ? "overdue" : "pending";
+            }
+            else
+            {
+                applyState = "in_sync";
+            }
+
+            // 16W19: policy apply failures -> emit activity edge-triggered.
+            try
+            {
+                var prior = _statusByChildGuid.TryGetValue(key, out var p) ? p : null;
+                if (req.LastPolicyApplyFailedAtUtc is not null)
+                {
+                    var prevFail = prior?.LastPolicyApplyFailedAtUtc;
+                    if (prevFail is null || req.LastPolicyApplyFailedAtUtc > prevFail)
+                    {
+                        var evt = new[] { new { kind = "policy_apply_failed", occurredAtUtc = DateTimeOffset.UtcNow.ToString("O"), failedAtUtc = req.LastPolicyApplyFailedAtUtc?.ToString("O"), error = req.LastPolicyApplyError } };
+                        var evtJson = System.Text.Json.JsonSerializer.Serialize(evt, JsonDefaults.Options);
+                        AppendLocalActivityJsonUnsafe_NoLock(childId.Value.ToString(), evtJson);
+                    }
+                }
+            }
+            catch { }
             var status = new ChildAgentStatus(
                 ChildId: childId,
                 LastSeenUtc: DateTimeOffset.UtcNow,
@@ -582,7 +627,19 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 WebTopBlockedDomains: webTopBlocked,
                 WebAlertsToday: webAlerts,
                 Circumvention: circumvention,
-                Tamper: tamper);
+                Tamper: tamper,
+                LastAppliedPolicyVersion: req.LastAppliedPolicyVersion,
+                LastAppliedPolicyEffectiveAtUtc: req.LastAppliedPolicyEffectiveAtUtc,
+                LastAppliedPolicyFingerprint: req.LastAppliedPolicyFingerprint,
+                LastPolicyApplyFailedAtUtc: req.LastPolicyApplyFailedAtUtc,
+                LastPolicyApplyError: req.LastPolicyApplyError,
+                PolicyApplyPendingSinceUtc: pendingSinceUtc,
+                PolicyApplyOverdue: overdue,
+                PolicyApplyState: applyState,
+                LastKnownGoodPolicyVersion: req.LastKnownGoodPolicyVersion,
+                RecommendedRollbackPolicyVersion: req.RecommendedRollbackPolicyVersion,
+                RecommendedRollbackReason: req.RecommendedRollbackReason,
+                RecommendedRollbackGeneratedAtUtc: req.RecommendedRollbackGeneratedAtUtc);
 
             _statusByChildGuid[key] = status;
 
