@@ -198,6 +198,32 @@ public sealed class ChildUxServer
         sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .grid{max-width:860px;display:grid;gap:12px;} .card{border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} ul{margin:8px 0 0 20px;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;}</style>");
         sb.Append("</head><body><div class='grid'>");
         sb.Append("<div class='card'><h1 style='margin:0'>Today</h1><div class='muted'>This is a local page on this device.</div></div>");
+        // Pairing status (K7+): derived from the agent's local auth cache.
+        var currentChildId = AgentAuthStore.LoadCurrentChildId();
+        AgentAuthStore.AgentAuthState? auth = null;
+        if (currentChildId is not null)
+        {
+            auth = AgentAuthStore.LoadAuth(currentChildId.Value);
+        }
+
+        var pairedLabel = currentChildId is null ? "Not paired" : "Paired";
+        var childIdLabel = currentChildId is null ? "(none)" : currentChildId.Value.Value.ToString();
+        var deviceIdLabel = auth is null ? "(unknown)" : auth.DeviceId.ToString();
+        var tokenAgeLabel = auth is null ? "(unknown)" : $"{Math.Max(0, (int)(DateTimeOffset.UtcNow - auth.IssuedAtUtc).TotalDays)} days";
+
+        sb.Append("<div class='card'>");
+        sb.Append("<h2 style='margin:0 0 8px 0'>Pairing</h2>");
+        sb.Append($"<div><b>Status:</b> {WebUtility.HtmlEncode(pairedLabel)}</div>");
+        sb.Append($"<div class='muted'><b>Child ID:</b> {WebUtility.HtmlEncode(childIdLabel)}</div>");
+        sb.Append($"<div class='muted'><b>Device ID:</b> {WebUtility.HtmlEncode(deviceIdLabel)}</div>");
+        sb.Append($"<div class='muted'><b>Token age:</b> {WebUtility.HtmlEncode(tokenAgeLabel)}</div>");
+        if (currentChildId is null)
+        {
+            sb.Append("<div style='margin-top:10px'>To start, ask a parent for a pairing code.</div>");
+        }
+        sb.Append("<div style='margin-top:10px'><a href='/pair'>Open pairing page</a></div>");
+        sb.Append("</div>");
+
 
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Screen time</h2><div><b>Remaining:</b> {WebUtility.HtmlEncode(limitLabel)}</div><div class='muted'><b>Used:</b> {WebUtility.HtmlEncode(usedLabel)}</div>");
