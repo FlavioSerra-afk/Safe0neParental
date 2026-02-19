@@ -23,6 +23,29 @@ We will split `JsonFileControlPlane` into **partial class files by domain**.
 * `JsonFileControlPlane.Persistence*.cs` — JSON read/write, atomic writes, schema/versioning.
 * `JsonFileControlPlane.EndpointCompat*.cs` — temporary endpoint shims (see Legacy policy).
 
+### Current implementation status
+
+The split is being applied incrementally. As of the latest green build, these domain partials exist:
+
+* `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Children.cs`
+  * Child list + archive state
+  * Local child meta + last-known location
+  * Child create/update helpers
+* `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Alerts.cs`
+  * Local Settings Profile JSON blob (includes alerts routing + inbox state)
+* `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Requests.cs`
+  * Access requests + grants (K8/P11)
+* `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Serialization.cs`
+  * Load/seed/persist + state records (schema/versioning)
+
+Planned next extractions (no API signature changes):
+
+* `JsonFileControlPlane.Policy*.cs`
+* `JsonFileControlPlane.Tokens*.cs`
+* `JsonFileControlPlane.Heartbeat*.cs`
+* `JsonFileControlPlane.Activity*.cs`
+* `JsonFileControlPlane.Reports*.cs`
+
 ### Guardrails
 
 * Each partial is allowed to define helpers for its domain **only**.
