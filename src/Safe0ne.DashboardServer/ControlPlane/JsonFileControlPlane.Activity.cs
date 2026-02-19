@@ -74,7 +74,8 @@ public sealed partial class JsonFileControlPlane
                 if (!_localActivityEventsJsonByChildGuid.TryGetValue(key, out var json) || string.IsNullOrWhiteSpace(json))
                     return "[]";
 
-                take = Math.Clamp(take, 1, 1000);
+                // Retention currently keeps up to 2000 events; allow callers to request up to that.
+                take = Math.Clamp(take, 1, 2000);
 
                 try
                 {

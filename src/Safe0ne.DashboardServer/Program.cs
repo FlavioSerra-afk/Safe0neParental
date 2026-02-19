@@ -2,6 +2,7 @@ using Microsoft.Extensions.Primitives;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Safe0ne.DashboardServer.ControlPlane;
+using Safe0ne.DashboardServer.Reports;
 using Safe0ne.DashboardServer.PolicyEngine;
 using Safe0ne.DashboardServer.LocalApi;
 using Safe0ne.Shared.Contracts;
@@ -18,6 +19,9 @@ builder.Services.AddCors(options =>
 
 // Control Plane store (file-backed persistence).
 builder.Services.AddSingleton<JsonFileControlPlane>();
+
+// 16W9: Local SSOT-backed reports scheduler (best-effort; never crashes server).
+builder.Services.AddHostedService<ReportSchedulerService>();
 
 var app = builder.Build();
 
@@ -96,6 +100,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid chil
             statusCode: StatusCodes.Status404NotFound);
     }
     return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
+});
+
+// LEGACY-COMPAT: Some older UI builds (or cached assets) accidentally called a malformed v1 status route
+// of the form /api/v1/childre_<id>/status (missing the "n/" segment and prepending an underscore).
+// Rather than spamming the console with 404s, we respond 200 with an application-level error.
+// RemoveAfter: when /Docs/00_Shared/Legacy-Code-Registry.md marks this surface unused.
+app.MapGet($"/api/{ApiVersions.V1}/childre_{{id}}/status", (string id) =>
+{
+    return Results.Json(
+        new ApiResponse<ChildAgentStatus>(null, new ApiError("legacy_route", "Use /api/v1/children/{childId}/status")),
+        JsonDefaults.Options);
 });
 
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/devices", (Guid childId, JsonFileControlPlane cp) =>
@@ -858,15 +873,17 @@ local.MapGet("/children", (HttpRequest req, JsonFileControlPlane cp) =>
 local.MapPost("/children", async (HttpRequest req, JsonFileControlPlane cp) =>
 {
     var body = await req.ReadFromJsonAsync<CreateLocalChildRequest>(JsonDefaults.Options);
-    // Canonical: DisplayName
-    // LEGACY-COMPAT: older callers used { name: "..." }
     var displayName = body?.DisplayName;
-    if (string.IsNullOrWhiteSpace(displayName)) displayName = body?.Name;
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        // LEGACY-COMPAT: older clients used { name: "..." }.
+        displayName = body?.Name;
+    }
 
     if (body is null || string.IsNullOrWhiteSpace(displayName))
     {
         return Results.Json(
-            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName is required")),
+            new ApiResponse<JsonFileControlPlane.LocalChildSnapshot>(null, new ApiError("bad_request", "DisplayName (or name) is required")),
             JsonDefaults.Options,
             statusCode: StatusCodes.Status400BadRequest);
     }
@@ -1515,7 +1532,7 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
-    return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
+    return Results.Json(new ApiResponse<object>(new { ok = true, childId = (childId is { } cid ? (Guid?)cid.Value : null) }, null), JsonDefaults.Options);
 });
 
 // Requests / Activity / Location (Local Mode)
@@ -1607,23 +1624,56 @@ local.MapPost("/children/{childId:guid}/activity", async (HttpRequest req, Guid 
     return Results.Json(new ApiResponse<object>(new { ok = true }, null), JsonDefaults.Options);
 });
 
-// Activity export (Local Mode)
-// Returns a stable envelope with "events" for UI export and contract tests.
+// Export a stable activity envelope for diagnostics / support bundles.
+// Returns the retained activity slice (up to retention max) in a single response.
 local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFileControlPlane cp) =>
 {
-    // Export intentionally ignores query filters for now and emits a single bundle.
-    var eventsJson = cp.GetLocalActivityJson(new ChildId(childId), fromUtc: null, toUtc: null, take: 1000);
-    using var eventsDoc = JsonDocument.Parse(eventsJson);
-    var events = eventsDoc.RootElement.Clone();
-
-    var envelope = new
+    // Export the full retained window (SSOT retention is 2000 events / 30 days).
+    var json = cp.GetLocalActivityJson(new ChildId(childId), fromUtc: null, toUtc: null, take: 2000);
+    using var doc = JsonDocument.Parse(json);
+    var events = doc.RootElement.Clone();
+    var data = new
     {
         childId,
-        exportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+        exportedAtUtc = DateTimeOffset.UtcNow,
         events
     };
+    return Results.Json(new ApiResponse<object>(data, null), JsonDefaults.Options);
+});
 
-    return Results.Json(new ApiResponse<object>(envelope, null), JsonDefaults.Options);
+
+// 16W9: Reports schedule authoring + run-now (Local Mode).
+// Stored under Local Settings Profile policy.reports; execution state stored under root.reportsState.
+local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    JsonObject? patch = null;
+    try
+    {
+        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
+    }
+    catch { }
+
+    if (patch is null)
+    {
+        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Expected JSON object schedule patch.")),
+            JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
+    var env = ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
+    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
+});
+
+local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) =>
+{
+    var ran = ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), DateTimeOffset.UtcNow, force: true);
+    return Results.Json(new ApiResponse<object>(new { ran }, null), JsonDefaults.Options);
 });
 
 
@@ -1685,82 +1735,6 @@ local.MapPost("/children/{childId:guid}/location", async (HttpRequest req, Guid 
     var payload = outDoc.RootElement.Clone();
     return Results.Json(new ApiResponse<JsonElement>(payload, null), JsonDefaults.Options);
 });
-
-// Reports (Local Mode)
-// Minimal SSOT-backed schedule and run-now surfaces for dashboard + tests.
-local.MapGet("/children/{childId:guid}/reports", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var nowUtc = DateTimeOffset.UtcNow;
-    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), nowUtc);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPatch("/children/{childId:guid}/reports", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
-{
-    JsonObject? patch;
-    try
-    {
-        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch
-    {
-        patch = null;
-    }
-
-    if (patch is null)
-    {
-        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Missing or invalid JSON body")), JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    Safe0ne.DashboardServer.Reports.ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
-
-    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-// LEGACY-COMPAT: older UI/tests used a dedicated schedule sub-route and PUT semantics.
-// Canonical is /reports (GET) and /reports (PATCH).
-// RemoveAfter: milestone_vNext_migrate_reports_schedule
-local.MapGet("/children/{childId:guid}/reports/schedule", (Guid childId, JsonFileControlPlane cp) =>
-{
-    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-local.MapPut("/children/{childId:guid}/reports/schedule", async (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
-{
-    JsonObject? patch;
-    try
-    {
-        patch = await req.ReadFromJsonAsync<JsonObject>(JsonDefaults.Options);
-    }
-    catch
-    {
-        patch = null;
-    }
-
-    if (patch is null)
-    {
-        return Results.Json(new ApiResponse<object?>(null, new ApiError("invalid_body", "Missing or invalid JSON body")), JsonDefaults.Options, statusCode: StatusCodes.Status400BadRequest);
-    }
-
-    Safe0ne.DashboardServer.Reports.ReportsDigest.UpsertSchedule(cp, new ChildId(childId), patch);
-
-    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), DateTimeOffset.UtcNow);
-    return Results.Json(new ApiResponse<object>(env, null), JsonDefaults.Options);
-});
-
-// Run digest now (force) - accept POST (canonical) and GET (legacy/UI convenience) to avoid 405 churn.
-static IResult RunDigestNow(Guid childId, JsonFileControlPlane cp)
-{
-    var nowUtc = DateTimeOffset.UtcNow;
-    var ran = Safe0ne.DashboardServer.Reports.ReportsDigest.TryRunDigestIfDue(cp, new ChildId(childId), nowUtc, force: true);
-    var env = Safe0ne.DashboardServer.Reports.ReportsDigest.ReadScheduleEnvelope(cp, new ChildId(childId), nowUtc);
-    return Results.Json(new ApiResponse<object>(new { ran, envelope = env }, null), JsonDefaults.Options);
-}
-
-local.MapPost("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) => RunDigestNow(childId, cp));
-local.MapGet("/children/{childId:guid}/reports/run-now", (Guid childId, JsonFileControlPlane cp) => RunDigestNow(childId, cp));
 
 static bool TryExtractLatLon(JsonElement locationObj, out double lat, out double lon)
 {

@@ -22,7 +22,7 @@ Activity is stored in the **Local SSOT** as an append-only stream per child, wit
 - **Retention window:** 30 days (prunes older events if timestamps exist)
 - **Max events:** 2000 newest events kept per child
 
-## Export (stub)
+## Export
 From the Activity tab you can click **Export** to open the current activity envelope in a new tab/window.
 
 There is a JSON export endpoint intended for later “diagnostics bundle” packaging:
