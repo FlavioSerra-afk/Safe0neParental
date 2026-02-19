@@ -181,9 +181,6 @@ public sealed class ChildUxServer
         var pol = snap.Policy;
         var st = snap.ScreenTime;
 
-        var currentChildId = AgentAuthStore.LoadCurrentChildId();
-        var auth = currentChildId is null ? null : AgentAuthStore.LoadAuth(currentChildId.Value);
-
         var now = DateTimeOffset.Now;
         var nextChange = ScheduleHelper.GetNextChange(now, pol);
 
@@ -202,57 +199,8 @@ public sealed class ChildUxServer
         sb.Append("</head><body><div class='grid'>");
         sb.Append("<div class='card'><h1 style='margin:0'>Today</h1><div class='muted'>This is a local page on this device.</div></div>");
 
-        // Pairing + local auth cache status.
-        sb.Append("<div class='card'>");
-        sb.Append("<h2 style='margin:0 0 8px 0'>Pairing</h2>");
-        if (currentChildId is null)
-        {
-            sb.Append("<div><b>Status:</b> Not paired</div>");
-            sb.Append("<div class='muted' style='margin-top:6px'>Ask a parent to pair this device, then enter the 6-digit code.</div>");
-            sb.Append("<div style='margin-top:10px'><a href='/pair'>Pair this device</a></div>");
-        }
-        else
-        {
-            sb.Append("<div><b>Status:</b> Paired</div>");
-            sb.Append($"<div class='muted'><b>Child ID:</b> {WebUtility.HtmlEncode(currentChildId.Value.Value.ToString())}</div>");
-            if (auth is null)
-            {
-                sb.Append("<div class='muted' style='margin-top:6px'>Token not issued yet (waiting for next heartbeat/pairing sync).</div>");
-            }
-            else
-            {
-                sb.Append($"<div class='muted' style='margin-top:6px'><b>Device:</b> {WebUtility.HtmlEncode(auth.DeviceId.ToString())}</div>");
-                sb.Append($"<div class='muted'><b>Token issued:</b> {WebUtility.HtmlEncode(auth.IssuedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
-            }
-        }
-        sb.Append("</div>");
-
         sb.Append("<div class='card'>");
         sb.Append($"<h2 style='margin:0 0 8px 0'>Screen time</h2><div><b>Remaining:</b> {WebUtility.HtmlEncode(limitLabel)}</div><div class='muted'><b>Used:</b> {WebUtility.HtmlEncode(usedLabel)}</div>");
-        sb.Append("</div>");
-
-        sb.Append("<div class='card'>");
-        sb.Append("<h2 style='margin:0 0 8px 0'>Policy</h2>");
-        if (pol is null)
-        {
-            sb.Append("<div><b>Status:</b> No policy received yet</div>");
-            sb.Append("<div class='muted' style='margin-top:6px'>This usually resolves after pairing and the next sync.</div>");
-        }
-        else
-        {
-            sb.Append($"<div><b>Version:</b> {WebUtility.HtmlEncode(pol.Version)}</div>");
-            sb.Append($"<div class='muted'><b>Updated:</b> {WebUtility.HtmlEncode(pol.UpdatedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
-        }
-
-        if (eff is not null)
-        {
-            var evalAge = now - eff.EvaluatedAtUtc;
-            sb.Append($"<div class='muted' style='margin-top:6px'><b>Last evaluation:</b> {WebUtility.HtmlEncode(eff.EvaluatedAtUtc.ToLocalTime().ToString(\"g\"))}</div>");
-            if (evalAge > TimeSpan.FromMinutes(10))
-            {
-                sb.Append($"<div class='muted'>May be offline (last evaluation {WebUtility.HtmlEncode(((int)evalAge.TotalMinutes).ToString())} min ago)</div>");
-            }
-        }
         sb.Append("</div>");
 
         sb.Append("<div class='card'>");
