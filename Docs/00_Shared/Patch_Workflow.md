@@ -24,3 +24,7 @@ Before implementing a patch that changes a hot file:
 
 ### Marker checks (recommended)
 Maintain a short list of “feature markers” that must remain present. If any marker is missing in the current SSOT snapshot, produce a **stabilization patch** first before adding new features.
+
+## Mandatory docs checklist
+- Before finalizing a patch, follow: `Docs/00_Shared/Change_Checklist.md`
+

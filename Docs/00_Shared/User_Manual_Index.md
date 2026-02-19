@@ -29,3 +29,7 @@ This is the **user-facing** manual for implemented Safe0ne functionality.
 14. `13_Device_Health.md`
 15. `Appendix_Glossary.md`
 16. `14_Activity_Feed.md`
+
+## Maintaining accuracy
+- Tracker process: `Docs/00_Shared/Tracker_Playbook.md`
+- Per-patch checklist: `Docs/00_Shared/Change_Checklist.md`

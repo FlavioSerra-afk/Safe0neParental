@@ -11,6 +11,7 @@ using Safe0ne.ChildAgent.ScreenTime;
 using Safe0ne.ChildAgent.AppUsage;
 using Safe0ne.ChildAgent.Activity;
 using Safe0ne.ChildAgent.WebFilter;
+using Safe0ne.ChildAgent.Pairing;
 using Safe0ne.ChildAgent.ChildUx;
 using Safe0ne.ChildAgent.Requests;
 using Safe0ne.ChildAgent.Diagnostics;
@@ -23,6 +24,7 @@ public sealed class HeartbeatWorker : BackgroundService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HeartbeatWorker> _logger;
+    private readonly EnrollmentService _enrollment;
 
     // K10: coarse tamper/health signals
     private DateTimeOffset? _lastEnforcementErrorAtUtc;
@@ -36,10 +38,11 @@ public sealed class HeartbeatWorker : BackgroundService
 
     private static readonly Guid DefaultChildGuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-    public HeartbeatWorker(IHttpClientFactory httpClientFactory, ILogger<HeartbeatWorker> logger, ChildStateStore childState, AccessRequestQueue requests)
+    public HeartbeatWorker(IHttpClientFactory httpClientFactory, ILogger<HeartbeatWorker> logger, EnrollmentService enrollment, ChildStateStore childState, AccessRequestQueue requests)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _enrollment = enrollment;
         _childState = childState;
         _requests = requests;
         _location = new LocationSender();
@@ -50,6 +53,37 @@ public sealed class HeartbeatWorker : BackgroundService
         var childId = ResolveChildId();
         var deviceName = Environment.MachineName;
         var agentVersion = typeof(HeartbeatWorker).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+
+        // Load auth for the resolved child. If missing, attempt canonical enroll-by-code (does not require knowing ChildId in advance).
+        var auth = AgentAuthStore.LoadAuth(childId);
+        if (auth is null)
+        {
+            var code = Environment.GetEnvironmentVariable("SAFEONE_PAIR_CODE");
+            var deviceNameOverride = Environment.GetEnvironmentVariable("SAFEONE_DEVICE_NAME");
+
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                var enroll = await _enrollment.EnrollByCodeAsync(code.Trim(), deviceNameOverride ?? deviceName, agentVersion, stoppingToken);
+                if (enroll.Ok && enroll.Data is not null)
+                {
+                    // EnrollmentService already persisted auth and current child id; align local runtime state to the server-assigned child.
+                    childId = enroll.Data.ChildId;
+                    auth = AgentAuthStore.LoadAuth(childId);
+
+                    // Stop repeated attempts.
+                    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", null);
+                }
+                else
+                {
+                    _logger.LogWarning("Enroll-by-code failed: {Message}", enroll.Message);
+                }
+            }
+
+            if (auth is null)
+            {
+                _logger.LogWarning("Not paired yet. Set SAFEONE_PAIR_CODE to pair this device.");
+            }
+        }
 
         // K4: daily screen time tracker (privacy-first, idle-filtered)
         var screenTracker = new ScreenTimeTracker(childId);
@@ -70,22 +104,6 @@ public sealed class HeartbeatWorker : BackgroundService
 	        var lastUnblockApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         _logger.LogInformation("Safe0ne Child Agent started. ChildId={ChildId} Device={Device} Version={Version}", childId.Value, deviceName, agentVersion);
-
-        var auth = AgentAuthStore.LoadAuth(childId);
-        if (auth is null)
-        {
-            auth = await TryPairAsync(childId, deviceName, agentVersion, stoppingToken);
-            if (auth is not null)
-            {
-                AgentAuthStore.SaveAuth(childId, auth);
-                _logger.LogInformation("Paired successfully. DeviceId={DeviceId}", auth.DeviceId);
-            }
-            else
-            {
-                _logger.LogWarning("Not paired yet. Set SAFEONE_PAIR_CODE to pair this device.");
-            }
-        }
-
 
 
         // PATCH 10B: policy enforcement v1 (Local Mode)
@@ -802,6 +820,8 @@ private static ChildId ResolveChildId()
     }
 
     
+    // LEGACY-COMPAT: Older pairing flow that required knowing ChildId and called /api/v1/children/{childId}/pair/complete.
+    // Canonical pairing is EnrollmentService.EnrollByCodeAsync (POST /api/local/devices/enroll).
     private async Task<AgentAuthStore.AgentAuthState?> TryPairAsync(ChildId childId, string deviceName, string agentVersion, CancellationToken ct)
     {
         var code = Environment.GetEnvironmentVariable("SAFEONE_PAIR_CODE");

@@ -5,6 +5,7 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Safe0ne.Shared.Contracts;
 using Safe0ne.ChildAgent.Requests;
+using Safe0ne.ChildAgent.Pairing;
 
 namespace Safe0ne.ChildAgent.ChildUx;
 
@@ -18,6 +19,7 @@ public sealed class ChildUxServer
     private readonly ChildStateStore _store;
     private readonly ILogger _logger;
     private readonly AccessRequestQueue _requests;
+    private readonly EnrollmentService _enrollment;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
 
@@ -665,16 +667,26 @@ private string HandlePair(string query)
         return RenderSimpleMessage("Pair device", "Pairing code looks invalid. Please enter the 6-digit code from the Parent app.", "/pair", "Try again");
     }
 
-    // Store code in-process so HeartbeatWorker can use it (SAFEONE_PAIR_CODE).
-    // NOTE: ChildId is still resolved at agent startup. If the agent was launched for the wrong ChildId, restart after fixing config.
-    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", code);
+    var deviceName = string.IsNullOrWhiteSpace(name) ? Environment.MachineName : name.Trim();
+    var agentVersion = typeof(ChildUxServer).Assembly.GetName().Version?.ToString() ?? "ChildAgent";
 
-    if (!string.IsNullOrWhiteSpace(name))
+    // Perform enrollment immediately (canonical pairing path). This avoids reliance on environment variables and "next heartbeat" timing.
+    var result = _enrollment.EnrollByCodeAsync(code, deviceName, agentVersion, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+
+    if (!result.Ok)
     {
-        Environment.SetEnvironmentVariable("SAFEONE_DEVICE_NAME", name.Trim());
+        return RenderSimpleMessage("Pair device", $"Pairing failed: {WebUtility.HtmlEncode(result.Message)}", "/pair", "Try again");
     }
 
-    return RenderSimpleMessage("Pairing queued", "Pairing code saved. The agent will attempt pairing on its next heartbeat. Return to Today and wait for status to update.", "/today", "Go to Today");
+    // Clear any queued pairing code to prevent repeated attempts.
+    Environment.SetEnvironmentVariable("SAFEONE_PAIR_CODE", null);
+    Environment.SetEnvironmentVariable("SAFEONE_DEVICE_NAME", null);
+
+    return RenderSimpleMessage("Paired ✅", "Device paired successfully. You can return to Today.", "/today", "Go to Today");
 }
+
+
 
 }
