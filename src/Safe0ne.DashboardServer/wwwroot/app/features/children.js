@@ -116,69 +116,6 @@ function renderPerAppLimitsCard(child, profile) {
   </div>`;
 }
 
-function renderWebFilterCard(child, profile) {
-  const wf = profile?.policy?.webFilter || {};
-  const mode = String(wf.mode || "Off");
-  const allowTxt = Array.isArray(wf.allowList) ? wf.allowList.join("\n") : "";
-  const denyTxt = Array.isArray(wf.denyList) ? wf.denyList.join("\n") : "";
-  const safeSearch = wf.safeSearch == null ? true : !!wf.safeSearch;
-  const blockAdult = wf.blockAdult == null ? true : !!wf.blockAdult;
-  const catsTxt = Array.isArray(wf.categories) ? wf.categories.join("\n") : "";
-
-  return `<div class="card" style="margin-top:14px;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">
-      <div>
-        <div style="font-weight:900;font-size:18px;">Web filter</div>
-        <div style="margin-top:6px;color:#64748b;font-size:12px;">Authoring for best‑effort web filtering (Windows-first). Enforcement remains best‑effort and may be bypassable.</div>
-      </div>
-    </div>
-
-    <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-      <div class="so-field">
-        <label>Mode</label>
-        <select data-field="webFilterMode">
-          <option value="Off" ${mode === "Off" ? "selected" : ""}>Off</option>
-          <option value="AllowList" ${mode === "AllowList" ? "selected" : ""}>Allow list only</option>
-          <option value="DenyList" ${mode === "DenyList" ? "selected" : ""}>Deny list</option>
-        </select>
-        <div style="margin-top:6px;color:#64748b;font-size:12px;">AllowList = block everything except listed domains. DenyList = block listed domains.</div>
-      </div>
-
-      <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-        <div class="so-field">
-          <label>Allow list domains (one per line)</label>
-          <textarea rows="6" data-field="webAllowList" placeholder="example.com\nwww.wikipedia.org">${escapeHtml(allowTxt)}</textarea>
-          <div style="margin-top:6px;color:#64748b;font-size:12px;">Used when Mode = AllowList.</div>
-        </div>
-        <div class="so-field">
-          <label>Deny list domains (one per line)</label>
-          <textarea rows="6" data-field="webDenyList" placeholder="bad.example\ntracking.example">${escapeHtml(denyTxt)}</textarea>
-          <div style="margin-top:6px;color:#64748b;font-size:12px;">Used when Mode = DenyList.</div>
-        </div>
-      </div>
-
-      <div class="so-field" style="grid-column:1/-1;">
-        <label>Categories (optional, one per line)</label>
-        <textarea rows="4" data-field="webCategories" placeholder="adult\ngambling\nsocial">${escapeHtml(catsTxt)}</textarea>
-        <div style="margin-top:6px;color:#64748b;font-size:12px;">Planned: category rules; current enforcement may only emit diagnostics/"would enforce" signals.</div>
-      </div>
-
-      <div style="grid-column:1/-1;display:flex;gap:18px;flex-wrap:wrap;align-items:center;">
-        <label style="display:flex;gap:10px;align-items:center;font-weight:900;color:#475569;">
-          <input type="checkbox" data-field="webSafeSearch" ${safeSearch ? "checked" : ""}/>
-          Prefer SafeSearch / strict search
-        </label>
-        <label style="display:flex;gap:10px;align-items:center;font-weight:900;color:#475569;">
-          <input type="checkbox" data-field="webBlockAdult" ${blockAdult ? "checked" : ""}/>
-          Block adult content (best‑effort)
-        </label>
-      </div>
-    </div>
-
-    <div style="margin-top:10px;color:#64748b;font-size:12px;">Tip: Use registrable domains (e.g. <code>example.com</code>) rather than full URLs. Keep lists small and test on the Kid device.</div>
-  </div>`;
-}
-
   function isGuid(s) {
     return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(s || ""));
   }
@@ -192,14 +129,6 @@ function renderWebFilterCard(child, profile) {
         mode: "Open",
         grantUntilUtc: null,
         alwaysAllowed: false,
-        webFilter: {
-          mode: "Off",
-          allowList: [],
-          denyList: [],
-          categories: [],
-          safeSearch: true,
-          blockAdult: true,
-        },
         apps: {
           allowList: [],
           denyList: [],
@@ -223,6 +152,8 @@ function renderWebFilterCard(child, profile) {
         web: true,
         apps: true,
         bedtime: true,
+        school: false,
+        homework: false,
         location: false,
         purchases: false,
       },
@@ -230,6 +161,10 @@ function renderWebFilterCard(child, profile) {
         screenMinutesPerDay: 120,
         bedtimeStart: "21:00",
         bedtimeEnd: "07:00",
+        schoolStart: "09:00",
+        schoolEnd: "15:00",
+        homeworkStart: "17:00",
+        homeworkEnd: "19:00",
       },
       devices: [],
 
@@ -390,6 +325,8 @@ function renderWebFilterCard(child, profile) {
           web: true,
           apps: true,
           bedtime: true,
+        school: false,
+        homework: false,
           location: false,
           purchases: false,
         },
@@ -397,6 +334,10 @@ function renderWebFilterCard(child, profile) {
           screenMinutesPerDay: 120,
           bedtimeStart: "21:00",
           bedtimeEnd: "07:00",
+        schoolStart: "09:00",
+        schoolEnd: "15:00",
+        homeworkStart: "17:00",
+        homeworkEnd: "19:00",
         },
 	        // Local fallback profile (used only when Local API is unavailable).
 	        // Keep it clearly non-demo: this represents "awaiting enrollment" until a device is paired.
@@ -1805,6 +1746,8 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
           ${permToggle("web", "Web filtering", profile.permissions.web)}
           ${permToggle("apps", "App controls", profile.permissions.apps)}
           ${permToggle("bedtime", "Bedtime enforcement", profile.permissions.bedtime)}
+          ${permToggle("school", "School window", profile.permissions.school)}
+          ${permToggle("homework", "Homework window", profile.permissions.homework)}
           ${permToggle("location", "Location sharing", profile.permissions.location)}
           ${permToggle("purchases", "Purchases", profile.permissions.purchases)}
         </div>
@@ -1843,12 +1786,6 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
                   ? profile.policy.timeBudget.warnMinutesRemaining.join(",")
                   : "5,1")
             )}"/>
-            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <span style="color:#64748b;font-size:12px">Presets:</span>
-              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="5,1" title="Classic">5,1</button>
-              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="10,5,1" title="Gentle">10,5,1</button>
-              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="15,10,5,1" title="More warnings">15,10,5,1</button>
-            </div>
             <div style="margin-top:6px;color:#64748b;font-size:12px;">Comma-separated minutes before limit (e.g., 10,5,1). Defaults to 5,1.</div>
           </div>
 
@@ -1873,13 +1810,25 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
           <div class="so-field"><label>Bedtime end</label>
             <input type="time" data-field="bedtimeEnd" value="${escapeHtml(profile.limits.bedtimeEnd)}"/>
           </div>
+
+          <div class="so-field"><label>School start</label>
+            <input type="time" data-field="schoolStart" value="${escapeHtml(profile.limits.schoolStart || "09:00")}"/>
+          </div>
+          <div class="so-field"><label>School end</label>
+            <input type="time" data-field="schoolEnd" value="${escapeHtml(profile.limits.schoolEnd || "15:00")}"/>
+          </div>
+
+          <div class="so-field"><label>Homework start</label>
+            <input type="time" data-field="homeworkStart" value="${escapeHtml(profile.limits.homeworkStart || "17:00")}"/>
+          </div>
+          <div class="so-field"><label>Homework end</label>
+            <input type="time" data-field="homeworkEnd" value="${escapeHtml(profile.limits.homeworkEnd || "19:00")}"/>
+          </div>
         </div>
       </div>
 
       
       ${renderPerAppLimitsCard(child, profile)}
-
-      ${renderWebFilterCard(child, profile)}
 
 <div class="card" style="margin-top:14px;display:flex;justify-content:flex-end;gap:12px;">
         <button class="so-btn" data-action="resetProfile" data-childid="${escapeHtml(child.id)}">Reset</button>
@@ -2528,15 +2477,6 @@ async function refreshPairingFromApi(childId) {
       }
       if (action === "noop") { ev.preventDefault(); return; }
 
-      if (action === "setWarnPreset") {
-        ev.preventDefault();
-        const v = btn.getAttribute("data-value") || "5,1";
-        const input = document.querySelector('input[data-field="warnAtMinutes"]');
-        if (input) input.value = v;
-        window.Safe0neUi?.toast?.("Updated", `Warnings preset set to ${v}.`);
-        return;
-      }
-
 
 if (action === "copyPairCode") {
   ev.preventDefault();
@@ -2956,10 +2896,42 @@ if (action === "requestDiagnosticsBundle") {
           document.querySelector('input[data-field="bedtimeEnd"]')?.value ?? "07:00"
         );
 
+        prof.limits.schoolStart = String(
+          document.querySelector('input[data-field="schoolStart"]')?.value ?? "09:00"
+        );
+        prof.limits.schoolEnd = String(
+          document.querySelector('input[data-field="schoolEnd"]')?.value ?? "15:00"
+        );
+
+        prof.limits.homeworkStart = String(
+          document.querySelector('input[data-field="homeworkStart"]')?.value ?? "17:00"
+        );
+        prof.limits.homeworkEnd = String(
+          document.querySelector('input[data-field="homeworkEnd"]')?.value ?? "19:00"
+        );
+
         // Screen time per-day overrides (optional). Stored under policy.timeBudget.perDayMinutes (Mon..Sun).
         prof.policy = prof.policy || {};
         prof.policy.timeBudget = prof.policy.timeBudget || {};
         prof.policy.timeBudget.dailyMinutes = prof.limits.screenMinutesPerDay;
+
+        // Schedules (K4/P6): expanded surface under policy.timeBudget.schedules.*
+        prof.policy.timeBudget.schedules = prof.policy.timeBudget.schedules || {};
+        prof.policy.timeBudget.schedules.bedtime = {
+          enabled: !!prof.permissions.bedtime,
+          startLocal: prof.limits.bedtimeStart,
+          endLocal: prof.limits.bedtimeEnd,
+        };
+        prof.policy.timeBudget.schedules.school = {
+          enabled: !!prof.permissions.school,
+          startLocal: prof.limits.schoolStart,
+          endLocal: prof.limits.schoolEnd,
+        };
+        prof.policy.timeBudget.schedules.homework = {
+          enabled: !!prof.permissions.homework,
+          startLocal: prof.limits.homeworkStart,
+          endLocal: prof.limits.homeworkEnd,
+        };
 
         const _readDay = (k) => {
           const raw = document.querySelector(`input[data-field="screenMinutes${k}"]`)?.value;
@@ -3055,21 +3027,6 @@ if (action === "requestDiagnosticsBundle") {
           pal.push({ id: lid, appId, minutesPerDay: minutes, days });
         }
         prof.policy.apps.perAppLimits = pal;
-
-        // Web filter (EPIC-WEB-FILTER): authoring only (additive)
-        prof.policy.webFilter = prof.policy.webFilter || {};
-        const wfMode = String(document.querySelector('select[data-field="webFilterMode"]')?.value || "Off");
-        const wfAllow = _splitLines(document.querySelector('textarea[data-field="webAllowList"]')?.value || "");
-        const wfDeny = _splitLines(document.querySelector('textarea[data-field="webDenyList"]')?.value || "");
-        const wfCats = _splitLines(document.querySelector('textarea[data-field="webCategories"]')?.value || "");
-        const wfSafe = document.querySelector('input[type="checkbox"][data-field="webSafeSearch"]');
-        const wfAdult = document.querySelector('input[type="checkbox"][data-field="webBlockAdult"]');
-        prof.policy.webFilter.mode = wfMode;
-        prof.policy.webFilter.allowList = wfAllow;
-        prof.policy.webFilter.denyList = wfDeny;
-        prof.policy.webFilter.categories = wfCats;
-        prof.policy.webFilter.safeSearch = wfSafe ? !!wfSafe.checked : true;
-        prof.policy.webFilter.blockAdult = wfAdult ? !!wfAdult.checked : true;
 
 // Alerts routing (16V)
         prof.policy.alerts = prof.policy.alerts || {};

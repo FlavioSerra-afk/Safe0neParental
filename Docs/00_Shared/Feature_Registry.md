@@ -1,6 +1,6 @@
 # Feature Registry (SSOT for feature tracking)
 
-Updated: 2026-02-17  
+Updated: 2026-02-20  
 Owner: Repo-wide (Docs-first LAW)
 
 This document is the **single source of truth** for tracking feature delivery status across:
@@ -39,16 +39,16 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-POLICY-WEB-SAFETY | Policy | SafeSearch/Restricted toggles persisted | ✅ | Parent: web safety toggles | SSOT: policy web safety | Implemented in 16T stream |
 | EPIC-LOCATION-GEOFENCE | Location | Geofence authoring + overlay + evaluation + alerts | ✅ | Parent: geofence overlay UX; Kid: eval; Alerts: activity | SSOT: geofence config + event stream | Implemented 16U13–16U15 |
 | EPIC-ALERTS-INBOX | Alerts | Alerts inbox: routing + grouping + ack | ✅ | Parent: Alerts inbox UI + ack | SSOT: alert routing/config + ack endpoints | Self-test PASS restored in 16W7a |
-| EPIC-REPORTS | Reports | Reports scheduling (local digest) | ✅ | Parent: reports scheduling surface + run-now | SSOT: policy.reports + reportsState + activity report_digest | 16W9: local scheduler + endpoints |
+| EPIC-REPORTS | Reports | Reports scheduling (local digest) | 🟢 | Parent: reports scheduling surface + run-now | SSOT: policy.reports + reportsState + activity report_digest | 16W9: local scheduler + endpoints |
 | EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Parent: pairing UX + device registry; Kid: pairing endpoint stub | SSOT: device registry + enrollment tokens | 26W08: token metadata persisted (issued/expires/revoked) + TTL enforced + revoke preserves record; **per-device lastSeen tracking + multi-device contract tests** |
 | EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🟡 | Kid agent | Server now surfaces pending/overdue + apply errors via heartbeat status; integrity/self-repair still planned | KFT-006+ |
-| EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
-| EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | ✅ | Kid agent | SSOT: app rules + grants | 26W08: foreground per-app caps + allow/deny enforcement + auto UnblockApp request (deterministic id) + kid blocked UX | SSOT: app rules + grants | Authoring exists; enforcement TBD |
+| EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | **26W08:** schedule windows now wire end-to-end in Local Mode (Bedtime + School + Homework authoring in Parent profile → agent mapping → effective state + ActiveSchedule). Full “mode precedence + kid UX polish” still in-flight. |
+| EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
 | EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🟡 | Kid UX | `/today` shows pairing + policy version/updated + screen-time + next schedule; `/blocked` explains why + links to request; `/emergency` shows emergency help + always-allowed essentials. Emergency contacts still planned. | Evidence: `src/Safe0ne.ChildAgent/ChildUx/ChildUxServer.cs`, `src/Safe0ne.ChildAgent/ChildUx/ChildStateStore.cs` |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |
-| EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | ✅ | Admin→Audit Log loads from SSOT; policy PUT/PATCH and device token revoke append entries | SSOT: append-only audit | 26W08: implemented SSOT-backed audit stream + endpoint; expand filters/export later |
+| EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | 🟢 | Admin→Audit Log loads from SSOT; policy PUT/PATCH and device token revoke append entries | SSOT: append-only audit | 26W08: implemented SSOT-backed audit stream + endpoint; expand filters/export later |
 
 ## How to update this registry (every patch)
 1. Identify affected epic(s) and specific features.

@@ -32,8 +32,6 @@ public sealed class HeartbeatWorker : BackgroundService
 
     // K7/K8: throttle local UX navigation so we don't spam the child.
     private DateTimeOffset _lastUxNavigateUtc = DateTimeOffset.MinValue;
-    // K5: throttle auto UnblockApp requests so we don't spam the parent.
-    private readonly Dictionary<string, DateTimeOffset> _lastAutoUnblockAppRequestUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly ChildStateStore _childState;
     private readonly AccessRequestQueue _requests;
     private readonly LocationSender _location;
@@ -609,7 +607,7 @@ if (auth?.DeviceToken is not null)
 
 
 			        // K4/K5: enforce (best-effort)
-			        TryEnforce(childId, enforcedMode, policy, depleted, bedtimeActive, foregroundExe, appTracker, effective?.ActiveGrants, ref lastLockAttemptUtc, ref _lastUxNavigateUtc);
+			        TryEnforce(enforcedMode, policy, depleted, bedtimeActive, foregroundExe, appTracker, effective?.ActiveGrants, ref lastLockAttemptUtc, ref _lastUxNavigateUtc);
 
                 // K7: publish a lightweight snapshot for the local child UX.
                 var usedTs = TimeSpan.FromSeconds(Math.Max(0, tick.UsedSecondsToday));
@@ -988,6 +986,14 @@ private static ChildPolicy? TryMapPolicyFromLocalProfileJson(JsonElement profile
             var bedtimeStart = "22:00";
             var bedtimeEnd = "07:00";
 
+            var schoolEnabled = false;
+            var schoolStart = "09:00";
+            var schoolEnd = "15:00";
+
+            var homeworkEnabled = false;
+            var homeworkStart = "17:00";
+            var homeworkEnd = "19:00";
+
             // policy.mode (string)
             if (profile.TryGetProperty("policy", out var pol) && pol.ValueKind == JsonValueKind.Object)
             {
@@ -1025,6 +1031,26 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                 if (bw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
                     bedtimeEnd = et.GetString() ?? bedtimeEnd;
             }
+
+            if (sch.TryGetProperty("school", out var sw) && sw.ValueKind == JsonValueKind.Object)
+            {
+                if (sw.TryGetProperty("enabled", out var en) && (en.ValueKind == JsonValueKind.True || en.ValueKind == JsonValueKind.False))
+                    schoolEnabled = en.GetBoolean();
+                if (sw.TryGetProperty("startLocal", out var st) && st.ValueKind == JsonValueKind.String)
+                    schoolStart = st.GetString() ?? schoolStart;
+                if (sw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
+                    schoolEnd = et.GetString() ?? schoolEnd;
+            }
+
+            if (sch.TryGetProperty("homework", out var hw) && hw.ValueKind == JsonValueKind.Object)
+            {
+                if (hw.TryGetProperty("enabled", out var en) && (en.ValueKind == JsonValueKind.True || en.ValueKind == JsonValueKind.False))
+                    homeworkEnabled = en.GetBoolean();
+                if (hw.TryGetProperty("startLocal", out var st) && st.ValueKind == JsonValueKind.String)
+                    homeworkStart = st.GetString() ?? homeworkStart;
+                if (hw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
+                    homeworkEnd = et.GetString() ?? homeworkEnd;
+            }
         }
     }
 }
@@ -1033,6 +1059,10 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
             {
                 if (perms.TryGetProperty("bedtime", out var bt) && bt.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     bedtimeEnabled = bt.GetBoolean();
+                if (perms.TryGetProperty("school", out var sc) && sc.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    schoolEnabled = sc.GetBoolean();
+                if (perms.TryGetProperty("homework", out var hw) && hw.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    homeworkEnabled = hw.GetBoolean();
             }
 
             // limits
@@ -1049,12 +1079,32 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                     bedtimeStart = bs.GetString() ?? bedtimeStart;
                 if (lim.TryGetProperty("bedtimeEnd", out var be) && be.ValueKind == JsonValueKind.String)
                     bedtimeEnd = be.GetString() ?? bedtimeEnd;
+
+                if (lim.TryGetProperty("schoolStart", out var ss) && ss.ValueKind == JsonValueKind.String)
+                    schoolStart = ss.GetString() ?? schoolStart;
+                if (lim.TryGetProperty("schoolEnd", out var se) && se.ValueKind == JsonValueKind.String)
+                    schoolEnd = se.GetString() ?? schoolEnd;
+
+                if (lim.TryGetProperty("homeworkStart", out var hs) && hs.ValueKind == JsonValueKind.String)
+                    homeworkStart = hs.GetString() ?? homeworkStart;
+                if (lim.TryGetProperty("homeworkEnd", out var he) && he.ValueKind == JsonValueKind.String)
+                    homeworkEnd = he.GetString() ?? homeworkEnd;
             }
 
             var bedtimeWindow = new ScheduleWindow(
                 Enabled: bedtimeEnabled,
                 StartLocal: bedtimeStart,
                 EndLocal: bedtimeEnd);
+
+            var schoolWindow = new ScheduleWindow(
+                Enabled: schoolEnabled,
+                StartLocal: schoolStart,
+                EndLocal: schoolEnd);
+
+            var homeworkWindow = new ScheduleWindow(
+                Enabled: homeworkEnabled,
+                StartLocal: homeworkStart,
+                EndLocal: homeworkEnd);
 
             // Build a v1 ChildPolicy snapshot from profile settings.
             // Version is synthetic in Local Mode (SSOT profile is the source of truth).
@@ -1065,7 +1115,9 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                 UpdatedAtUtc: DateTimeOffset.UtcNow,
                 UpdatedBy: "local_profile",
                 DailyScreenTimeLimitMinutes: screenMins,
-                BedtimeWindow: bedtimeWindow);
+                BedtimeWindow: bedtimeWindow,
+                SchoolWindow: schoolWindow,
+                HomeworkWindow: homeworkWindow);
         }
         catch
         {
@@ -1083,6 +1135,12 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
             policy.BedtimeWindow?.Enabled == true ? "1" : "0",
             policy.BedtimeWindow?.StartLocal ?? string.Empty,
             policy.BedtimeWindow?.EndLocal ?? string.Empty,
+            policy.SchoolWindow?.Enabled == true ? "1" : "0",
+            policy.SchoolWindow?.StartLocal ?? string.Empty,
+            policy.SchoolWindow?.EndLocal ?? string.Empty,
+            policy.HomeworkWindow?.Enabled == true ? "1" : "0",
+            policy.HomeworkWindow?.StartLocal ?? string.Empty,
+            policy.HomeworkWindow?.EndLocal ?? string.Empty,
         });
     }
 
@@ -1105,7 +1163,13 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                     dailyScreenTimeLimitMinutes = policyV1.DailyScreenTimeLimitMinutes,
                     bedtimeEnabled = policyV1.BedtimeWindow?.Enabled == true,
                     bedtimeStartLocal = policyV1.BedtimeWindow?.StartLocal,
-                    bedtimeEndLocal = policyV1.BedtimeWindow?.EndLocal
+                    bedtimeEndLocal = policyV1.BedtimeWindow?.EndLocal,
+                    schoolEnabled = policyV1.SchoolWindow?.Enabled == true,
+                    schoolStartLocal = policyV1.SchoolWindow?.StartLocal,
+                    schoolEndLocal = policyV1.SchoolWindow?.EndLocal,
+                    homeworkEnabled = policyV1.HomeworkWindow?.Enabled == true,
+                    homeworkStartLocal = policyV1.HomeworkWindow?.StartLocal,
+                    homeworkEndLocal = policyV1.HomeworkWindow?.EndLocal
                 },
                 hasExpandedSurface = policySurface is not null
             };
@@ -1223,7 +1287,7 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
     }
 
 
-private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? policy, bool budgetDepleted, bool bedtimeActive, string? foregroundExe, AppUsageTracker appTracker, Grant[]? activeGrants, ref DateTimeOffset lastLockAttemptUtc, ref DateTimeOffset lastUxNavigateUtc)
+private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budgetDepleted, bool bedtimeActive, string? foregroundExe, AppUsageTracker appTracker, Grant[]? activeGrants, ref DateTimeOffset lastLockAttemptUtc, ref DateTimeOffset lastUxNavigateUtc)
     {
         try
         {
@@ -1252,7 +1316,7 @@ private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? p
 
                 if (deniedToEnforce.Count > 0)
                 {
-                    TryKillProcesses(childId, deniedToEnforce, reason: "deny_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(deniedToEnforce, reason: "deny_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
             }
 
@@ -1272,7 +1336,7 @@ private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? p
                     var usedSec = appTracker.GetUsedSecondsTodayFor(fg);
                     if (usedSec >= (limit.LimitMinutes * 60))
                     {
-                        TryKillProcesses(childId, new[] { fg }, reason: "per_app_limit", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                        TryKillProcesses(new[] { fg }, reason: "per_app_limit", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                     }
                 }
             }
@@ -1291,7 +1355,7 @@ private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? p
 
                 if (!IsEssentialProcess(fg) && !allowed.Any(a => NormalizeExe(a) == fg))
                 {
-                    TryKillProcesses(childId, new[] { fg }, reason: "allow_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(new[] { fg }, reason: "allow_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
             }
 
@@ -1302,7 +1366,7 @@ private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? p
             {
                 if (denied.Count == 0)
                 {
-                    TryKillProcesses(childId, new[] { "notepad.exe" }, reason: "lockdown_default", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(new[] { "notepad.exe" }, reason: "lockdown_default", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
 
                 if (budgetDepleted || bedtimeActive)
@@ -1387,77 +1451,6 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
         return policy with { WebAllowedDomains = allow.ToArray() };
     }
 
-
-
-private void MaybeAutoRequestUnblockApp(ChildId childId, string exe, string reason)
-{
-    // Only auto-request for policy-driven app blocks (avoid noise from lockdown defaults).
-    if (!(reason is "deny_list" or "allow_list" or "per_app_limit")) return;
-
-    var now = DateTimeOffset.UtcNow;
-    if (_lastAutoUnblockAppRequestUtc.TryGetValue(exe, out var last) && (now - last) < TimeSpan.FromMinutes(10))
-        return;
-
-    _lastAutoUnblockAppRequestUtc[exe] = now;
-
-    var localDate = DateTimeOffset.Now.ToString("yyyy-MM-dd");
-    var rid = BuildDeterministicRequestId(childId, AccessRequestType.UnblockApp, exe, localDate);
-
-    var why = reason switch
-    {
-        "deny_list" => "App blocked by deny list",
-        "allow_list" => "App blocked by allow list",
-        "per_app_limit" => "Daily limit reached for this app",
-        _ => "App blocked"
-    };
-
-    _requests.Enqueue(childId, AccessRequestType.UnblockApp, exe, why, requestId: rid);
-}
-
-private static Guid BuildDeterministicRequestId(ChildId childId, AccessRequestType type, string target, string localDate)
-{
-    // RFC4122-ish v5 name-based UUID using SHA-1. Namespace is fixed per request-type.
-    // We only need stability/idempotence, not cryptographic security.
-    var ns = Guid.Parse("b2b1b4a0-2b2a-4c5b-9f59-7b6c2a2c9e21"); // Safe0ne stable namespace
-    var name = $"{childId.Value}|{type}|{(target ?? string.Empty).Trim().ToLowerInvariant()}|{localDate}";
-    return UuidV5(ns, name);
-}
-
-private static Guid UuidV5(Guid @namespace, string name)
-{
-    // Convert namespace UUID to network order bytes.
-    var nsBytes = @namespace.ToByteArray();
-    SwapGuidByteOrder(nsBytes);
-
-    var nameBytes = System.Text.Encoding.UTF8.GetBytes(name ?? string.Empty);
-    var data = new byte[nsBytes.Length + nameBytes.Length];
-    Buffer.BlockCopy(nsBytes, 0, data, 0, nsBytes.Length);
-    Buffer.BlockCopy(nameBytes, 0, data, nsBytes.Length, nameBytes.Length);
-
-    using var sha1 = System.Security.Cryptography.SHA1.Create();
-    var hash = sha1.ComputeHash(data);
-
-    var newGuid = new byte[16];
-    Array.Copy(hash, 0, newGuid, 0, 16);
-
-    // Set version to 5.
-    newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
-    // Set variant to RFC4122.
-    newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
-
-    SwapGuidByteOrder(newGuid);
-    return new Guid(newGuid);
-}
-
-private static void SwapGuidByteOrder(byte[] guid)
-{
-    // .NET Guid uses mixed-endian layout; RFC4122 is network order for the first 3 fields.
-    static void Swap(byte[] g, int a, int b) { (g[a], g[b]) = (g[b], g[a]); }
-    Swap(guid, 0, 3); Swap(guid, 1, 2);
-    Swap(guid, 4, 5);
-    Swap(guid, 6, 7);
-}
-
     private static bool IsEssentialProcess(string exe)
         => exe is "explorer.exe" or "dwm.exe" or "csrss.exe" or "winlogon.exe" or "services.exe" or "lsass.exe";
 
@@ -1468,7 +1461,7 @@ private static void SwapGuidByteOrder(byte[] guid)
         return n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? n : (n + ".exe");
     }
 
-    private void TryKillProcesses(ChildId childId, IEnumerable<string> processNames, string reason, AppUsageTracker appTracker, string kindForUx, ref DateTimeOffset lastUxNavigateUtc)
+    private void TryKillProcesses(IEnumerable<string> processNames, string reason, AppUsageTracker appTracker, string kindForUx, ref DateTimeOffset lastUxNavigateUtc)
     {
         foreach (var raw in processNames)
         {
@@ -1483,7 +1476,6 @@ private static void SwapGuidByteOrder(byte[] guid)
                 {
                     p.Kill(entireProcessTree: true);
                     appTracker.RecordBlocked(exe, reason);
-                    MaybeAutoRequestUnblockApp(childId, exe, reason);
                     _logger.LogInformation("Terminated process {ProcessName} (pid {Pid}) reason={Reason}", p.ProcessName, p.Id, reason);
 
                     // K7: show the child an explainable screen (best-effort, throttled).

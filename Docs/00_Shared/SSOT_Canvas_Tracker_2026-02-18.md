@@ -181,17 +181,17 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Acceptance: agent reports applied version; server detects overdue; rollback endpoint works.
   - Risks: ⚠️ Cross-app contract risk
 
-- 🟡 Screen time tracking / enforcement
-  - Lives: `ScreenTime/*`
-  - Acceptance: tracks minutes; enforces configured daily limit; grace+warnings honored.
+- 🟢 Screen time tracking / enforcement
+  - Lives: `ScreenTime/*` + schedule evaluator `ChildUx/ScheduleHelper.cs`
+  - Acceptance: tracks minutes; enforces configured daily limit; grace+warnings honored; **schedule windows (Bedtime + School + Homework) are authored in Parent profile and enforced via effective mode**.
 
-- 🟡 App usage tracking / per-app limits
+- 🟢 App usage tracking / per-app limits
   - Lives: `AppUsage/*`
-  - Acceptance: tracks app usage; enforces per-app caps.
+  - Acceptance: tracks app usage; enforces per-app caps; blocked UX + request loop best-effort.
 
-- 🟡 Web filter enforcement + circumvention best-effort
+- 🟢 Web filter enforcement + circumvention best-effort
   - Lives: `WebFilter/*`
-  - Acceptance: blocks domains/categories; logs attempts; circumvention signals to alerts.
+  - Acceptance: blocks domains/categories; logs attempts; circumvention signals to alerts + reports.
 
 - 🟡 Kid UX (Today / Block screens / Why + Request)
   - Lives: `ChildUx/*`
@@ -238,7 +238,3 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
-
-
-## Patch log (recent)
-- 26W08: EPIC-APP-USAGE-ENFORCEMENT: enforce per-app caps + auto UnblockApp request + deterministic request id
