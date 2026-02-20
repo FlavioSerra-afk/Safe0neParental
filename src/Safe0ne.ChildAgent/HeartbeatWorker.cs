@@ -186,21 +186,6 @@ if (auth?.DeviceToken is not null)
                         policySurface = pol;
                 }
 
-                // 26W08: policy sync self-repair health (best-effort)
-                var syncHealth = PolicySyncHealthStore.Load(childId);
-                if (localPolicyEnvRes?.Ok == true)
-                {
-                    syncHealth = syncHealth with
-                    {
-                        ConsecutivePolicyFetchFailures = 0,
-                        LastPolicyFetchOkAtUtc = DateTimeOffset.UtcNow
-                    };
-                }
-                else
-                {
-                    syncHealth = syncHealth with { ConsecutivePolicyFetchFailures = Math.Min(99, syncHealth.ConsecutivePolicyFetchFailures + 1) };
-                }
-
 
                 // 16W14: replay protection. Ignore older policy versions than what we already applied.
                 // This prevents a stale local server state (or a reboot) from rolling the kid back to an older policy.
@@ -637,17 +622,11 @@ if (auth?.DeviceToken is not null)
                     BudgetDepleted: depleted);
 
 
-                var authRejected = syncHealth.AuthRejectedAtUtc is not null && (nowUtc - syncHealth.AuthRejectedAtUtc.Value) < TimeSpan.FromHours(6);
                 var tamper = new TamperSignals(
                     NotRunningElevated: OperatingSystem.IsWindows() && !IsRunningElevatedWindows(),
                     EnforcementError: _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30),
                     LastError: _lastEnforcementError,
-                    LastErrorAtUtc: _lastEnforcementErrorAtUtc,
-                    Notes: null,
-                    ConsecutiveHeartbeatFailures: syncHealth.ConsecutiveHeartbeatFailures,
-                    ConsecutivePolicyFetchFailures: syncHealth.ConsecutivePolicyFetchFailures,
-                    AuthRejected: authRejected,
-                    AuthRejectedAtUtc: syncHealth.AuthRejectedAtUtc);
+                    LastErrorAtUtc: _lastEnforcementErrorAtUtc);
                 // Build the strongly-typed heartbeat envelope (contracts are additive-only).
                 // 16W19: also report the last policy we actually applied, and any best-effort apply failure signal.
 
@@ -707,32 +686,15 @@ if (auth?.DeviceToken is not null)
                 if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     _logger.LogWarning("Heartbeat rejected (401). This child has paired devices; run pairing (SAFEONE_PAIR_CODE). ");
-
-                    syncHealth = syncHealth with
-                    {
-                        ConsecutiveHeartbeatFailures = Math.Min(99, syncHealth.ConsecutiveHeartbeatFailures + 1),
-                        AuthRejectedAtUtc = DateTimeOffset.UtcNow
-                    };
                 }
                 else if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Heartbeat failed: HTTP {Status}", (int)resp.StatusCode);
-
-                    syncHealth = syncHealth with { ConsecutiveHeartbeatFailures = Math.Min(99, syncHealth.ConsecutiveHeartbeatFailures + 1) };
                 }
                 else
                 {
                     _logger.LogDebug("Heartbeat ok");
-
-                    syncHealth = syncHealth with
-                    {
-                        ConsecutiveHeartbeatFailures = 0,
-                        LastHeartbeatOkAtUtc = DateTimeOffset.UtcNow
-                    };
                 }
-
-                // Persist self-repair health state (best-effort).
-                PolicySyncHealthStore.Save(childId, syncHealth);
             
 
                 await PollAndAckCommandsAsync(client, childId, stoppingToken);
@@ -742,24 +704,7 @@ if (auth?.DeviceToken is not null)
                 _logger.LogWarning(ex, "Heartbeat loop error");
             }
 
-            // 26W08: bounded exponential backoff + jitter to avoid retry storms.
-            var failures = 0;
-            try
-            {
-                var cid = AgentAuthStore.LoadCurrentChildId();
-                if (cid is not null)
-                {
-                    var h = PolicySyncHealthStore.Load(cid);
-                    failures = Math.Max(h.ConsecutiveHeartbeatFailures, h.ConsecutivePolicyFetchFailures);
-                }
-            }
-            catch { }
-
-            const int baseDelaySec = 5;
-            var cappedPow = Math.Min(4, failures);
-            var backoffSec = failures <= 0 ? baseDelaySec : Math.Min(60, baseDelaySec * (int)Math.Pow(2, cappedPow));
-            var jitterMs = failures <= 0 ? 0 : Random.Shared.Next(0, 3000);
-            await Task.Delay(TimeSpan.FromSeconds(backoffSec) + TimeSpan.FromMilliseconds(jitterMs), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
         }
     }
 
@@ -1041,14 +986,6 @@ private static ChildPolicy? TryMapPolicyFromLocalProfileJson(JsonElement profile
             var bedtimeStart = "22:00";
             var bedtimeEnd = "07:00";
 
-            var schoolEnabled = false;
-            var schoolStart = "09:00";
-            var schoolEnd = "15:00";
-
-            var homeworkEnabled = false;
-            var homeworkStart = "17:00";
-            var homeworkEnd = "19:00";
-
             // policy.mode (string)
             if (profile.TryGetProperty("policy", out var pol) && pol.ValueKind == JsonValueKind.Object)
             {
@@ -1086,26 +1023,6 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                 if (bw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
                     bedtimeEnd = et.GetString() ?? bedtimeEnd;
             }
-
-            if (sch.TryGetProperty("school", out var sw) && sw.ValueKind == JsonValueKind.Object)
-            {
-                if (sw.TryGetProperty("enabled", out var en) && (en.ValueKind == JsonValueKind.True || en.ValueKind == JsonValueKind.False))
-                    schoolEnabled = en.GetBoolean();
-                if (sw.TryGetProperty("startLocal", out var st) && st.ValueKind == JsonValueKind.String)
-                    schoolStart = st.GetString() ?? schoolStart;
-                if (sw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
-                    schoolEnd = et.GetString() ?? schoolEnd;
-            }
-
-            if (sch.TryGetProperty("homework", out var hw) && hw.ValueKind == JsonValueKind.Object)
-            {
-                if (hw.TryGetProperty("enabled", out var en) && (en.ValueKind == JsonValueKind.True || en.ValueKind == JsonValueKind.False))
-                    homeworkEnabled = en.GetBoolean();
-                if (hw.TryGetProperty("startLocal", out var st) && st.ValueKind == JsonValueKind.String)
-                    homeworkStart = st.GetString() ?? homeworkStart;
-                if (hw.TryGetProperty("endLocal", out var et) && et.ValueKind == JsonValueKind.String)
-                    homeworkEnd = et.GetString() ?? homeworkEnd;
-            }
         }
     }
 }
@@ -1114,10 +1031,6 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
             {
                 if (perms.TryGetProperty("bedtime", out var bt) && bt.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     bedtimeEnabled = bt.GetBoolean();
-                if (perms.TryGetProperty("school", out var sc) && sc.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                    schoolEnabled = sc.GetBoolean();
-                if (perms.TryGetProperty("homework", out var hw) && hw.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                    homeworkEnabled = hw.GetBoolean();
             }
 
             // limits
@@ -1134,32 +1047,12 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                     bedtimeStart = bs.GetString() ?? bedtimeStart;
                 if (lim.TryGetProperty("bedtimeEnd", out var be) && be.ValueKind == JsonValueKind.String)
                     bedtimeEnd = be.GetString() ?? bedtimeEnd;
-
-                if (lim.TryGetProperty("schoolStart", out var ss) && ss.ValueKind == JsonValueKind.String)
-                    schoolStart = ss.GetString() ?? schoolStart;
-                if (lim.TryGetProperty("schoolEnd", out var se) && se.ValueKind == JsonValueKind.String)
-                    schoolEnd = se.GetString() ?? schoolEnd;
-
-                if (lim.TryGetProperty("homeworkStart", out var hs) && hs.ValueKind == JsonValueKind.String)
-                    homeworkStart = hs.GetString() ?? homeworkStart;
-                if (lim.TryGetProperty("homeworkEnd", out var he) && he.ValueKind == JsonValueKind.String)
-                    homeworkEnd = he.GetString() ?? homeworkEnd;
             }
 
             var bedtimeWindow = new ScheduleWindow(
                 Enabled: bedtimeEnabled,
                 StartLocal: bedtimeStart,
                 EndLocal: bedtimeEnd);
-
-            var schoolWindow = new ScheduleWindow(
-                Enabled: schoolEnabled,
-                StartLocal: schoolStart,
-                EndLocal: schoolEnd);
-
-            var homeworkWindow = new ScheduleWindow(
-                Enabled: homeworkEnabled,
-                StartLocal: homeworkStart,
-                EndLocal: homeworkEnd);
 
             // Build a v1 ChildPolicy snapshot from profile settings.
             // Version is synthetic in Local Mode (SSOT profile is the source of truth).
@@ -1170,9 +1063,7 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                 UpdatedAtUtc: DateTimeOffset.UtcNow,
                 UpdatedBy: "local_profile",
                 DailyScreenTimeLimitMinutes: screenMins,
-                BedtimeWindow: bedtimeWindow,
-                SchoolWindow: schoolWindow,
-                HomeworkWindow: homeworkWindow);
+                BedtimeWindow: bedtimeWindow);
         }
         catch
         {
@@ -1190,12 +1081,6 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
             policy.BedtimeWindow?.Enabled == true ? "1" : "0",
             policy.BedtimeWindow?.StartLocal ?? string.Empty,
             policy.BedtimeWindow?.EndLocal ?? string.Empty,
-            policy.SchoolWindow?.Enabled == true ? "1" : "0",
-            policy.SchoolWindow?.StartLocal ?? string.Empty,
-            policy.SchoolWindow?.EndLocal ?? string.Empty,
-            policy.HomeworkWindow?.Enabled == true ? "1" : "0",
-            policy.HomeworkWindow?.StartLocal ?? string.Empty,
-            policy.HomeworkWindow?.EndLocal ?? string.Empty,
         });
     }
 
@@ -1218,13 +1103,7 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
                     dailyScreenTimeLimitMinutes = policyV1.DailyScreenTimeLimitMinutes,
                     bedtimeEnabled = policyV1.BedtimeWindow?.Enabled == true,
                     bedtimeStartLocal = policyV1.BedtimeWindow?.StartLocal,
-                    bedtimeEndLocal = policyV1.BedtimeWindow?.EndLocal,
-                    schoolEnabled = policyV1.SchoolWindow?.Enabled == true,
-                    schoolStartLocal = policyV1.SchoolWindow?.StartLocal,
-                    schoolEndLocal = policyV1.SchoolWindow?.EndLocal,
-                    homeworkEnabled = policyV1.HomeworkWindow?.Enabled == true,
-                    homeworkStartLocal = policyV1.HomeworkWindow?.StartLocal,
-                    homeworkEndLocal = policyV1.HomeworkWindow?.EndLocal
+                    bedtimeEndLocal = policyV1.BedtimeWindow?.EndLocal
                 },
                 hasExpandedSurface = policySurface is not null
             };
