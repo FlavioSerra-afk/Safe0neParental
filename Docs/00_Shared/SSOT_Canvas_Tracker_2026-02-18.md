@@ -185,11 +185,11 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Lives: `ScreenTime/*`
   - Acceptance: tracks minutes; enforces configured daily limit; grace+warnings honored.
 
-- 🟢 App usage tracking / per-app limits (26W08)
+- 🟡 App usage tracking / per-app limits
   - Lives: `AppUsage/*`
   - Acceptance: tracks app usage; enforces per-app caps.
 
-- 🟢 Web filter enforcement + circumvention best-effort (26W08)
+- 🟡 Web filter enforcement + circumvention best-effort
   - Lives: `WebFilter/*`
   - Acceptance: blocks domains/categories; logs attempts; circumvention signals to alerts.
 
@@ -238,3 +238,6 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
+
+
+- 26W08: FIX — /api/v1/children/{id}/status returns 200 not_seen (avoid WebView console 404 spam)

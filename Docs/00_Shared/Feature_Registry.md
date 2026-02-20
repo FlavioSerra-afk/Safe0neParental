@@ -59,3 +59,6 @@ This document is the **single source of truth** for tracking feature delivery st
 4. Ensure marker/self-tests remain green.
 
 - 🟡 ENG: ControlPlane partial split — extracted Policy domain to JsonFileControlPlane.Policy.cs (seed)
+
+
+| EPIC-JS-ERROR-CAPTURE | JS runtime error capture + DevTools surfacing | 🟢 | Evidence: wwwroot/app/shared/errors.js + DevTools panel | 26W08 |

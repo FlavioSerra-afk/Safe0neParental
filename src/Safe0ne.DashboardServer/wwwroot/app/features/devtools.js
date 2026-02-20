@@ -117,6 +117,23 @@
       `;
     })();
 
+    const jsErrorsCard = (function(){
+      const has = !!window.Safe0neErrors;
+      const hint = has ? 'Captured from window.onerror + unhandledrejection (in-memory only).' : 'Safe0neErrors capture not loaded.';
+      return `
+        <div class="card" style="margin-top:16px;">
+          <h2 style="margin-top:0;">Console errors (captured)</h2>
+          <p class="muted">${escapeHtml(hint)}</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+            <button class="btn btn--ghost" id="dtJsErrRefresh" type="button">Refresh</button>
+            <button class="btn btn--ghost" id="dtJsErrExport" type="button">Export JSON</button>
+            <button class="btn btn--danger" id="dtJsErrClear" type="button">Clear</button>
+          </div>
+          <div id="dtJsErrors"><div class="muted">No captured errors yet.</div></div>
+        </div>
+      `;
+    })();
+
     const activityCard = `
       <div class="card" style="margin-top:16px;">
         <h2 style="margin-top:0;">Recent Activity (Local Mode)</h2>
@@ -178,7 +195,7 @@
 
         ${activityCard}
 
-        ${modulesCard}
+        ${modulesCard}${jsErrorsCard}
 
         <div class="card" style="margin-top:16px;">
           <h2 style="margin-top:0;">Environment</h2>
@@ -199,6 +216,55 @@
   }
 
   function mountDevTools() {
+    // JS error capture panel
+    function _renderJsErrors(){
+      const host = document.getElementById('dtJsErrors');
+      if (!host) return;
+      const cap = window.Safe0neErrors;
+      if (!cap || typeof cap.list !== 'function'){
+        host.innerHTML = `<div class="muted">JS error capture is not available (errors.js not loaded).</div>`;
+        return;
+      }
+      const entries = cap.list();
+      if (!entries.length){
+        host.innerHTML = `<div class="muted">No captured errors.</div>`;
+        return;
+      }
+      const items = entries.slice().reverse().map((e)=>{
+        const t = escapeHtml(e.t || '');
+        const kind = escapeHtml(e.kind || '');
+        const msg = escapeHtml(e.message || '');
+        const src = escapeHtml(e.source || '');
+        const lc = (e.line||e.col) ? `:${Number(e.line||0)}:${Number(e.col||0)}` : '';
+        const stack = e.error && e.error.stack ? escapeHtml(String(e.error.stack)) : '';
+        return `
+          <details style="padding:8px 0;border-top:1px solid #eee;">
+            <summary><strong>${kind}</strong> — ${msg} <span class="muted">${t}</span></summary>
+            <div class="muted" style="margin-top:6px;">${src}${lc}</div>
+            ${stack ? `<pre class="code" style="white-space:pre-wrap;margin-top:8px;">${stack}</pre>` : ``}
+          </details>
+        `;
+      }).join('');
+      host.innerHTML = items;
+    }
+
+    function _download(name, text){
+      try{
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch{} }, 2000);
+      }catch(e){
+        console.warn('DevTools: export failed', e);
+        _setFeedback('Export failed (see console).');
+      }
+    }
+
     // Wire up after DOM mount
     setTimeout(() => {
       const $reload = document.getElementById("dtReload");
@@ -398,7 +464,28 @@
         console.warn("DevTools: module toggle wiring failed", e);
       }
     }, 0);
-  }
+  
+    try{
+      const rBtn = document.getElementById('dtJsErrRefresh');
+      if (rBtn) rBtn.addEventListener('click', function(){ _renderJsErrors(); });
+      const eBtn = document.getElementById('dtJsErrExport');
+      if (eBtn) eBtn.addEventListener('click', function(){
+        const cap = window.Safe0neErrors;
+        const json = cap && typeof cap.exportJson==='function' ? cap.exportJson() : JSON.stringify({ entries: [] }, null, 2);
+        const stamp = (new Date()).toISOString().replaceAll(':','').replaceAll('-','').replaceAll('.','');
+        _download('safe0ne_js_errors_'+stamp+'.json', json);
+      });
+      const cBtn = document.getElementById('dtJsErrClear');
+      if (cBtn) cBtn.addEventListener('click', function(){
+        const cap = window.Safe0neErrors;
+        if (cap && typeof cap.clear==='function') cap.clear();
+        _renderJsErrors();
+      });
+      _renderJsErrors();
+    }catch(e){
+      console.warn('DevTools: JS errors panel wiring failed', e);
+    }
+}
 
   window.Safe0neDevTools = {
     renderDevTools,

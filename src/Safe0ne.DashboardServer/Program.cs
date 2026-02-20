@@ -92,13 +92,17 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/effective", (Guid c
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
+
+    // UX NOTE: A child can exist before any agent has checked in. Returning HTTP 404 here causes
+    // noisy console spam in embedded WebView clients ("Failed to load resource"), even though this
+    // is an expected state ("Never seen"). So we return HTTP 200 with an ApiError payload.
     if (!cp.TryGetStatus(id, out var status))
     {
         return Results.Json(
-            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_found", "Child status not found")),
-            JsonDefaults.Options,
-            statusCode: StatusCodes.Status404NotFound);
+            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_seen", "Child has not checked in yet")),
+            JsonDefaults.Options);
     }
+
     return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
 });
 
@@ -436,26 +440,6 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles
     }
 
     return Results.File(path, "application/zip", fileDownloadName: info.FileName);
-});
-
-// Diagnostics bundle history (filesystem-derived): list + download by filename.
-app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles", (Guid childId, int? max, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    var list = cp.ListDiagnosticsBundles(id, max ?? 25).ToList();
-    return Results.Json(new ApiResponse<List<DiagnosticsBundleInfo>>(list, null), JsonDefaults.Options);
-});
-
-app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles/{{fileName}}", (Guid childId, string fileName, JsonFileControlPlane cp) =>
-{
-    var id = new ChildId(childId);
-    if (!cp.TryGetDiagnosticsBundleByFileName(id, fileName, out var path))
-    {
-        return Results.Json(new ApiResponse<string>(null, new ApiError("not_found", "Diagnostics bundle not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
-    }
-
-    var safeName = Path.GetFileName(fileName);
-    return Results.File(path, "application/zip", fileDownloadName: safeName);
 });
 app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
 {

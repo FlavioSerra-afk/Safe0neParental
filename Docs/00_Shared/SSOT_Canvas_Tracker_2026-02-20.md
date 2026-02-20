@@ -245,3 +245,6 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 ## Patch log (recent)
 - 26W08: EPIC-WEB-FILTER-CIRCUMVENTION: Reports circumvention digest + docs/canvas update
+
+
+26W08: EPIC-JS-ERROR-CAPTURE: window.onerror/unhandledrejection ring buffer + DevTools export/clear.
