@@ -60,7 +60,7 @@
     const scheduleId = "reports-schedule";
     const activityId = "reports-activity";
     const screenId = "reports-screen-time";
-    const appUsageId = "reports-app-usage";
+    const webId = "reports-web-filter";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -101,10 +101,10 @@
         if (stRoot) await renderScreenTimeDigest(stRoot, children);
       }catch{}
 
-      // EPIC-APP-USAGE: render a quick app usage digest panel from agent status rollups.
+      // EPIC-WEB-FILTER: render a best-effort digest from SSOT activity signals.
       try{
-        const auRoot = document.getElementById(appUsageId);
-        if (auRoot) await renderAppUsageDigest(auRoot, children);
+        const wfRoot = document.getElementById(webId);
+        if (wfRoot) await renderWebFilterDigest(wfRoot, children);
       }catch{}
 
       // 16V: Alerts routing config (per child) — best-effort.
@@ -237,9 +237,9 @@
           <div id="${screenId}">${escapeHtml("Loading…")}</div>
         </div>
         <div class="card">
-          <h2>App usage</h2>
-          <p class="muted">Top apps used today and blocked attempts (privacy-first rollups). If an app is blocked, an Unblock App request can be created.</p>
-          <div id="${appUsageId}">${escapeHtml("Loading…")}</div>
+          <h2>Web filter</h2>
+          <p class="muted">Best-effort web filtering signals from kid devices ("would enforce" + diagnostics). Use this to confirm mode + rule counts are flowing.</p>
+          <div id="${webId}">${escapeHtml("Loading…")}</div>
         </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
@@ -308,65 +308,61 @@
     `;
   }
 
-
-  async function renderAppUsageDigest(root, children){
+  async function renderWebFilterDigest(root, children){
     if (!root) return;
-    root.innerHTML = `<div class="skeleton">Loading app usage…</div>`;
+    root.innerHTML = `<div class="skeleton">Loading web filter…</div>`;
+
+    const sinceMs = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const fromIso = new Date(sinceMs).toISOString();
 
     const rows = [];
     for (const c of (children || [])){
       const id = c && c.id ? String(c.id) : "";
       if (!id) continue;
-      const st = await Safe0neApi.getChildStatus(id);
-      if (st && st.ok){
-        rows.push({ child: c, status: st.data || {} });
-      }else{
-        rows.push({ child: c, status: { _error: (st && st.error) ? st.error : "Unknown" } });
+      const act = await Safe0neApi.getChildActivityLocal(id, { from: fromIso, take: 200 });
+      if (!act || !act.ok){
+        rows.push({ child: c, err: act && act.error ? act.error : "Unknown" });
+        continue;
       }
-    }
-
-    function fmt(sec){
-      const s = Number(sec || 0);
-      const mins = Math.round(s / 60);
-      return `${mins}m`;
+      const items = Array.isArray(act.data && act.data.items) ? act.data.items : [];
+      const sig = items.find((x) => String(x && x.kind) === "policy_would_enforce_web");
+      rows.push({ child: c, sig: sig || null });
     }
 
     const html = rows.map(r => {
       const name = escapeHtml(r.child && r.child.name ? r.child.name : "Child");
-      const s = r.status || {};
-      if (s._error){
-        return `<div class="notice notice--warning" style="margin-bottom:10px"><b>${name}</b><div class="muted">${escapeHtml(String(s._error))}</div></div>`;
+      if (r.err){
+        return `<tr><td>${name}</td><td colspan="3" class="muted">${escapeHtml(String(r.err))}</td></tr>`;
       }
+      const sig = r.sig;
+      if (!sig){
+        return `<tr><td>${name}</td><td colspan="3" class="muted">No web-filter signal in last 7 days.</td></tr>`;
+      }
+      const data = sig.data || {};
+      const mode = escapeHtml(String(data.mode || ""));
+      const rules = Number.isFinite(Number(data.domainRulesCount)) ? String(data.domainRulesCount) : "—";
+      const ss = (data.safeSearch == null) ? "—" : (data.safeSearch ? "On" : "Off");
+      const adult = (data.blockAdult == null) ? "—" : (data.blockAdult ? "On" : "Off");
+      const when = escapeHtml(String(sig.atUtc || ""));
+      return `<tr>
+        <td>${name}</td>
+        <td><span class="badge">${mode || "(unknown)"}</span></td>
+        <td class="muted">rules=${escapeHtml(rules)} · safeSearch=${escapeHtml(ss)} · adult=${escapeHtml(adult)}</td>
+        <td class="muted">${when ? when : ""}</td>
+      </tr>`;
+    }).join("");
 
-      const usage = Array.isArray(s.topAppUsage) ? s.topAppUsage : [];
-      const blocked = Array.isArray(s.topBlockedApps) ? s.topBlockedApps : [];
-
-      const usageHtml = usage.length
-        ? `<ul>` + usage.slice(0,8).map(u => `<li><b>${escapeHtml(u.processName || "")}</b> <span class="muted">${fmt(u.usedSecondsToday)}</span></li>`).join('') + `</ul>`
-        : `<div class="muted">No app usage yet today.</div>`;
-
-      const blockedHtml = blocked.length
-        ? `<ul>` + blocked.slice(0,8).map(b => `<li><b>${escapeHtml(b.processName || "")}</b> <span class="muted">x${escapeHtml(b.count ?? 0)} (${escapeHtml(b.reason || "blocked")})</span></li>`).join('') + `</ul>`
-        : `<div class="muted">No blocked attempts recorded.</div>`;
-
-      return `
-        <div class="card" style="padding:14px;margin-bottom:10px">
-          <div style="font-weight:800">${name}</div>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:8px">
-            <div>
-              <div style="font-weight:700">Top used</div>
-              ${usageHtml}
-            </div>
-            <div>
-              <div style="font-weight:700">Blocked attempts</div>
-              ${blockedHtml}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    root.innerHTML = html || `<div class="notice">No data.</div>`;
+    root.innerHTML = `
+      <div style="overflow:auto">
+        <table class="table" style="min-width:760px">
+          <thead><tr>
+            <th>Child</th><th>Mode</th><th>Signals</th><th>Last event</th>
+          </tr></thead>
+          <tbody>${html || `<tr><td colspan="4" class="muted">No data.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px">Web filtering is best‑effort. Treat this panel as a diagnostics indicator that policy settings are flowing to the Kid device.</div>
+    `;
   }
 
   NS.render = renderReports;

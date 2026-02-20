@@ -185,7 +185,7 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Lives: `src/Safe0ne.ChildAgent/ScreenTime/*`, `src/Safe0ne.ChildAgent/HeartbeatWorker.cs`, `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.cs`, UI `wwwroot/app/features/children.js` + `reports.js`
   - Acceptance: Parent can save daily limit/+grace/+warn thresholds; policyVersion bumps; agent enforces daily limit; depleted triggers blocked UX; MoreTime request is created (kid UI + best-effort auto); parent can approve/deny; status rollup shows used/remaining; Reports page shows digest.
 
-- 🟢 App usage tracking / per-app limits
+- 🟡 App usage tracking / per-app limits
   - Lives: `AppUsage/*`
   - Acceptance: tracks app usage; enforces per-app caps.
 
@@ -240,3 +240,4 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
+- 26W08: EPIC-WEB-FILTER authoring (policy.webFilter.*) + Reports web digest (policy_would_enforce_web) + docs updated.

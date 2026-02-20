@@ -116,6 +116,69 @@ function renderPerAppLimitsCard(child, profile) {
   </div>`;
 }
 
+function renderWebFilterCard(child, profile) {
+  const wf = profile?.policy?.webFilter || {};
+  const mode = String(wf.mode || "Off");
+  const allowTxt = Array.isArray(wf.allowList) ? wf.allowList.join("\n") : "";
+  const denyTxt = Array.isArray(wf.denyList) ? wf.denyList.join("\n") : "";
+  const safeSearch = wf.safeSearch == null ? true : !!wf.safeSearch;
+  const blockAdult = wf.blockAdult == null ? true : !!wf.blockAdult;
+  const catsTxt = Array.isArray(wf.categories) ? wf.categories.join("\n") : "";
+
+  return `<div class="card" style="margin-top:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">
+      <div>
+        <div style="font-weight:900;font-size:18px;">Web filter</div>
+        <div style="margin-top:6px;color:#64748b;font-size:12px;">Authoring for best‑effort web filtering (Windows-first). Enforcement remains best‑effort and may be bypassable.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+      <div class="so-field">
+        <label>Mode</label>
+        <select data-field="webFilterMode">
+          <option value="Off" ${mode === "Off" ? "selected" : ""}>Off</option>
+          <option value="AllowList" ${mode === "AllowList" ? "selected" : ""}>Allow list only</option>
+          <option value="DenyList" ${mode === "DenyList" ? "selected" : ""}>Deny list</option>
+        </select>
+        <div style="margin-top:6px;color:#64748b;font-size:12px;">AllowList = block everything except listed domains. DenyList = block listed domains.</div>
+      </div>
+
+      <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+        <div class="so-field">
+          <label>Allow list domains (one per line)</label>
+          <textarea rows="6" data-field="webAllowList" placeholder="example.com\nwww.wikipedia.org">${escapeHtml(allowTxt)}</textarea>
+          <div style="margin-top:6px;color:#64748b;font-size:12px;">Used when Mode = AllowList.</div>
+        </div>
+        <div class="so-field">
+          <label>Deny list domains (one per line)</label>
+          <textarea rows="6" data-field="webDenyList" placeholder="bad.example\ntracking.example">${escapeHtml(denyTxt)}</textarea>
+          <div style="margin-top:6px;color:#64748b;font-size:12px;">Used when Mode = DenyList.</div>
+        </div>
+      </div>
+
+      <div class="so-field" style="grid-column:1/-1;">
+        <label>Categories (optional, one per line)</label>
+        <textarea rows="4" data-field="webCategories" placeholder="adult\ngambling\nsocial">${escapeHtml(catsTxt)}</textarea>
+        <div style="margin-top:6px;color:#64748b;font-size:12px;">Planned: category rules; current enforcement may only emit diagnostics/"would enforce" signals.</div>
+      </div>
+
+      <div style="grid-column:1/-1;display:flex;gap:18px;flex-wrap:wrap;align-items:center;">
+        <label style="display:flex;gap:10px;align-items:center;font-weight:900;color:#475569;">
+          <input type="checkbox" data-field="webSafeSearch" ${safeSearch ? "checked" : ""}/>
+          Prefer SafeSearch / strict search
+        </label>
+        <label style="display:flex;gap:10px;align-items:center;font-weight:900;color:#475569;">
+          <input type="checkbox" data-field="webBlockAdult" ${blockAdult ? "checked" : ""}/>
+          Block adult content (best‑effort)
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;color:#64748b;font-size:12px;">Tip: Use registrable domains (e.g. <code>example.com</code>) rather than full URLs. Keep lists small and test on the Kid device.</div>
+  </div>`;
+}
+
   function isGuid(s) {
     return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(s || ""));
   }
@@ -129,6 +192,14 @@ function renderPerAppLimitsCard(child, profile) {
         mode: "Open",
         grantUntilUtc: null,
         alwaysAllowed: false,
+        webFilter: {
+          mode: "Off",
+          allowList: [],
+          denyList: [],
+          categories: [],
+          safeSearch: true,
+          blockAdult: true,
+        },
         apps: {
           allowList: [],
           denyList: [],
@@ -641,7 +712,6 @@ function renderDevicesTab(child) {
         const sizeKb = has ? Math.round(((diagInfo.sizeBytes || 0) / 1024)) : 0;
         const fileName = has ? String(diagInfo.fileName || "diagnostics.zip") : "diagnostics.zip";
         const dl = `/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/latest`;
-        const supportDl = `/api/v1/children/${encodeURIComponent(id)}/diagnostics/supportbundle/latest`;
         return `
           <div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
             <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -654,7 +724,6 @@ function renderDevicesTab(child) {
             </div>
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="so-btn" data-action="requestDiagnosticsBundle" data-childid="${escapeHtml(id)}" type="button">Request new bundle</button>
-              <a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(supportDl)}" download>Support bundle</a>
               ${has ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(dl)}" download>Download ZIP</a>` : `<button class="so-btn" data-action="noop" type="button" disabled>Download ZIP</button>`}
             </div>
             <div class="so-card-sub" style="margin-top:8px;">Tip: the Kid device must be online to upload the bundle after you request it.</div>
@@ -1809,6 +1878,8 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
 
       
       ${renderPerAppLimitsCard(child, profile)}
+
+      ${renderWebFilterCard(child, profile)}
 
 <div class="card" style="margin-top:14px;display:flex;justify-content:flex-end;gap:12px;">
         <button class="so-btn" data-action="resetProfile" data-childid="${escapeHtml(child.id)}">Reset</button>
@@ -2984,6 +3055,21 @@ if (action === "requestDiagnosticsBundle") {
           pal.push({ id: lid, appId, minutesPerDay: minutes, days });
         }
         prof.policy.apps.perAppLimits = pal;
+
+        // Web filter (EPIC-WEB-FILTER): authoring only (additive)
+        prof.policy.webFilter = prof.policy.webFilter || {};
+        const wfMode = String(document.querySelector('select[data-field="webFilterMode"]')?.value || "Off");
+        const wfAllow = _splitLines(document.querySelector('textarea[data-field="webAllowList"]')?.value || "");
+        const wfDeny = _splitLines(document.querySelector('textarea[data-field="webDenyList"]')?.value || "");
+        const wfCats = _splitLines(document.querySelector('textarea[data-field="webCategories"]')?.value || "");
+        const wfSafe = document.querySelector('input[type="checkbox"][data-field="webSafeSearch"]');
+        const wfAdult = document.querySelector('input[type="checkbox"][data-field="webBlockAdult"]');
+        prof.policy.webFilter.mode = wfMode;
+        prof.policy.webFilter.allowList = wfAllow;
+        prof.policy.webFilter.denyList = wfDeny;
+        prof.policy.webFilter.categories = wfCats;
+        prof.policy.webFilter.safeSearch = wfSafe ? !!wfSafe.checked : true;
+        prof.policy.webFilter.blockAdult = wfAdult ? !!wfAdult.checked : true;
 
 // Alerts routing (16V)
         prof.policy.alerts = prof.policy.alerts || {};
