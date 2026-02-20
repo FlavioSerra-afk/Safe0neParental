@@ -50,6 +50,7 @@
             <div class="kv">
               <span>Download</span>
               <a class="btn" href="/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/latest" download>Download ZIP</a>
+              <a class="btn" href="/api/v1/children/${encodeURIComponent(id)}/diagnostics/supportbundle/latest" download>Support bundle</a>
             </div>
           `;
         }
