@@ -28,3 +28,20 @@ What to do:
 - Restart the Parent App (it should start DashboardServer).
 - Verify the DashboardServer process is running.
 - Re-run DevTools self-tests (Health / SSOT purity) once available.
+
+## Collect a diagnostics bundle (for support)
+
+If support asks for a **diagnostics bundle**, you can request and download a small ZIP from the UI.
+
+Where:
+- **Children → select a child → Devices tab → Diagnostics bundle**
+- **Support & Safety** page (if available in navigation)
+
+Flow:
+1. Click **Request new bundle**.
+2. Leave the Kid device running and online for 10–30 seconds.
+3. Click **Download ZIP** once it appears.
+
+Privacy notes:
+- The bundle is **privacy-first** and excludes secrets (pairing tokens/auth state).
+- It is intended for troubleshooting pairing and policy sync issues.

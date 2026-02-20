@@ -150,9 +150,13 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Lives: endpoints in `Program.cs` (`/pair/start`, `/pair/complete`, `/devices`) + CP device registries
   - Acceptance: pairing completes; device appears under child; token auth required when devices exist.
 
+- 🟢 Diagnostics bundles (request + upload + download)
+  - Lives: `Program.cs` (`/api/v1/children/{id}/diagnostics/bundles*`), Child Agent `Diagnostics/DiagnosticsBundle.cs` + command handler in `HeartbeatWorker.cs`, UI `wwwroot/app/features/support.js` and `children.js`.
+  - Acceptance: parent can request bundle; kid uploads privacy-first ZIP; parent can download from Devices tab or Support page.
+
 - 🟡 Device health surfaces
   - Lives: heartbeat endpoint + `ChildAgentStatus` contract + UI surfaces
-  - Acceptance: last-seen + status badges; diagnostics bundle link.
+  - Acceptance: last-seen + status badges; basic health indicators without regressions.
 
 - 🟢 Audit log viewer
   - Lives: `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.Audit.cs` + `Program.cs` (`/api/local/children/{id}/audit`) + UI `wwwroot/app/features/admin.js`.
@@ -233,3 +237,4 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 ## Patch log
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
+- 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.

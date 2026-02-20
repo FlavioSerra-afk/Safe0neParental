@@ -545,6 +545,16 @@ function renderDevicesTab(child) {
   const apiDevices = useApi ? state.api.devicesByChildId[id] : null;
   const pairing = useApi ? state.api.pairingByChildId[id] : null;
 
+  // Diagnostics bundles are uploaded by the Kid device (K9). We show the latest bundle metadata here.
+  if (state?.api?.available && isGuid(id) && !state.diagnosticsLoaded[id]) {
+    state.diagnosticsLoaded[id] = true;
+    setTimeout(() => {
+      Promise.resolve(refreshDiagnosticsInfoFromApi(id))
+        .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+        .catch(() => {});
+    }, 0);
+  }
+
   const fallbackProf = ensureProfile(child);
   const fallback = Array.isArray(fallbackProf.devices) ? fallbackProf.devices : [];
   const devices = Array.isArray(apiDevices) ? apiDevices : (fallback.length ? fallback : []);
@@ -622,6 +632,34 @@ function renderDevicesTab(child) {
       </div>`
     : `<div style="margin-top:12px;" class="so-card-sub">Pair devices to this child profile (local mode requires SSOT-backed child).</div>`;
 
+  const diagInfo = (useApi && state.api && state.api.diagnosticsInfoByChildId) ? state.api.diagnosticsInfoByChildId[id] : null;
+  const diagBlock = (useApi
+    ? (function(){
+        const has = !!diagInfo;
+        const createdAt = has && diagInfo.createdAtUtc ? new Date(diagInfo.createdAtUtc).toLocaleString() : "—";
+        const sizeKb = has ? Math.round(((diagInfo.sizeBytes || 0) / 1024)) : 0;
+        const fileName = has ? String(diagInfo.fileName || "diagnostics.zip") : "diagnostics.zip";
+        const dl = `/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/latest`;
+        return `
+          <div class="card" style="margin-top:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.25);">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+              <div style="font-weight:900;">Diagnostics bundle</div>
+              <div class="so-card-sub">Uploaded by the Kid device (privacy-first)</div>
+            </div>
+            <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+              <div class="kv"><span>Latest</span><span>${escapeHtml(has ? `${createdAt} (${sizeKb} KB)` : "None yet")}</span></div>
+              <div class="kv"><span>File</span><span>${escapeHtml(fileName)}</span></div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="so-btn" data-action="requestDiagnosticsBundle" data-childid="${escapeHtml(id)}" type="button">Request new bundle</button>
+              ${has ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(dl)}" download>Download ZIP</a>` : `<button class="so-btn" data-action="noop" type="button" disabled>Download ZIP</button>`}
+            </div>
+            <div class="so-card-sub" style="margin-top:8px;">Tip: the Kid device must be online to upload the bundle after you request it.</div>
+          </div>
+        `;
+      })()
+    : "");
+
   return `
     <div class="card" style="margin-top:14px;">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -630,6 +668,7 @@ function renderDevicesTab(child) {
       </div>
       ${pairActions}
       ${pairingBlock}
+      ${diagBlock}
       <div class="table" style="margin-top:12px;">
         <div class="tr th"><div>Device</div><div>Status</div><div>Last seen</div><div></div></div>
         ${rows}
@@ -1776,9 +1815,10 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
   const state = {
     draft: null,
     showArchived: readBool(LS_SHOW_ARCHIVED, false),
-    api: { available: false, children: null, inFlight: false, saveFailedByChildId: {}, devicesByChildId: {}, pairingByChildId: {}, statusByChildId: {}, statusInFlight: {}, devicesInFlight: {}, pairingInFlight: {}, activityInFlight: {}, locationInFlight: {} },
+    api: { available: false, children: null, inFlight: false, saveFailedByChildId: {}, devicesByChildId: {}, pairingByChildId: {}, statusByChildId: {}, diagnosticsInfoByChildId: {}, statusInFlight: {}, diagnosticsInFlight: {}, devicesInFlight: {}, pairingInFlight: {}, activityInFlight: {}, locationInFlight: {} },
     profilesLoaded: {},
     devicesLoaded: {},
+    diagnosticsLoaded: {},
     activityLoaded: {},
     locationLoaded: {},
     geoUi: { selectedIdByChild: {}, zoomByChild: {}, minByChild: {}, viewByChild: {} },
@@ -1842,6 +1882,28 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
       return false;
     }finally{
       state.api.statusInFlight[id] = false;
+    }
+  }
+
+  async function refreshDiagnosticsInfoFromApi(childId){
+    const id = String(childId || '');
+    if (!isGuid(id)) return false;
+    const api = window.Safe0neApi;
+    if (!api || typeof api.getLatestDiagnosticsInfo !== 'function') return false;
+    if (state.api.diagnosticsInFlight[id]) return false;
+    state.api.diagnosticsInFlight[id] = true;
+    try{
+      const res = await api.getLatestDiagnosticsInfo(id);
+      if (res && res.ok && res.data){
+        state.api.diagnosticsInfoByChildId[id] = res.data;
+        return true;
+      }
+      state.api.diagnosticsInfoByChildId[id] = null;
+      return false;
+    }catch{
+      return false;
+    }finally{
+      state.api.diagnosticsInFlight[id] = false;
     }
   }
 
@@ -2685,6 +2747,26 @@ if (action === "revokeDeviceToken") {
     .then(() => Promise.resolve(refreshDevicesFromApi(cid)))
     .then(() => window.Safe0neRouter?.render?.())
     .catch(() => window.Safe0neUi?.toast?.("Revoke failed", "Could not revoke device token."));
+  return;
+}
+
+if (action === "requestDiagnosticsBundle") {
+  ev.preventDefault();
+  const cid = childId || "";
+  if (!isGuid(cid) || !window.Safe0neApi?.sendChildCommand) return;
+  const payload = { type: "diagnostics_bundle", expiresInMinutes: 10 };
+  Promise.resolve(window.Safe0neApi.sendChildCommand(cid, payload))
+    .then((res) => {
+      if (!res || !res.ok) throw new Error(res?.error || "Request failed");
+      window.Safe0neUi?.toast?.("Requested", "Leave the Kid device running, then refresh in ~30 seconds.");
+      // Best-effort refresh after a short delay.
+      setTimeout(() => {
+        Promise.resolve(refreshDiagnosticsInfoFromApi(cid))
+          .then(() => window.Safe0neRouter?.render?.())
+          .catch(() => {});
+      }, 2500);
+    })
+    .catch(() => window.Safe0neUi?.toast?.("Request failed", "Could not request diagnostics bundle."));
   return;
 }
 
