@@ -239,4 +239,6 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
 
-- 26W08: Diagnostics **support bundle** packaging pipeline: server assembles ZIP (server snapshot + child profile/policy + recent activity/requests + latest kid bundle if present) + UI download buttons.
+
+## Patch log (recent)
+- 26W08: EPIC-APP-USAGE-ENFORCEMENT: enforce per-app caps + auto UnblockApp request + deterministic request id

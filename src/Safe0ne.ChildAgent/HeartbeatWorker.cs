@@ -2,8 +2,6 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
 using System.Text.Json;
-using System.Text;
-using System.Security.Cryptography;
 using System.Diagnostics;
 using System.Security.Principal;
 using Microsoft.Extensions.Hosting;
@@ -34,6 +32,8 @@ public sealed class HeartbeatWorker : BackgroundService
 
     // K7/K8: throttle local UX navigation so we don't spam the child.
     private DateTimeOffset _lastUxNavigateUtc = DateTimeOffset.MinValue;
+    // K5: throttle auto UnblockApp requests so we don't spam the parent.
+    private readonly Dictionary<string, DateTimeOffset> _lastAutoUnblockAppRequestUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly ChildStateStore _childState;
     private readonly AccessRequestQueue _requests;
     private readonly LocationSender _location;
@@ -539,22 +539,8 @@ if (auth?.DeviceToken is not null)
                         App: foregroundExe,
                         Details: JsonSerializer.Serialize(new { usedSecondsToday = tick.UsedSecondsToday, dailyLimitMinutes = limitMins, extraMinutes = extraMins, reason = "daily_budget" }, JsonDefaults.Options),
                         DeviceId: auth?.DeviceId.ToString()));
-
-                    // K8/P11 + EPIC-SCREEN-TIME: when daily budget is first depleted, auto-queue a MoreTime request
-                    // so the parent can approve without the child needing to hunt for the request UI.
-                    // Guard: do not spam when extra minutes are already granted (extraMins > 0).
-                    try
-                    {
-                        if ((limitMins ?? 0) > 0 && extraMins <= 0)
-                        {
-                            var rid = BuildDeterministicRequestId(childId, tick.LocalDate, AccessRequestType.MoreTime, "screen_time");
-                            _requests.Enqueue(childId, AccessRequestType.MoreTime, "screen_time", "Daily screen time limit reached", rid);
-                        }
-                    }
-                    catch { /* best effort */ }
                 }
                 else if (!depleted && lastDepleted)
-
                 {
                     lastDepleted = false;
                     activityOutbox ??= new ActivityOutbox(childId);
@@ -1401,6 +1387,77 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
         return policy with { WebAllowedDomains = allow.ToArray() };
     }
 
+
+
+private void MaybeAutoRequestUnblockApp(ChildId childId, string exe, string reason)
+{
+    // Only auto-request for policy-driven app blocks (avoid noise from lockdown defaults).
+    if (!(reason is "deny_list" or "allow_list" or "per_app_limit")) return;
+
+    var now = DateTimeOffset.UtcNow;
+    if (_lastAutoUnblockAppRequestUtc.TryGetValue(exe, out var last) && (now - last) < TimeSpan.FromMinutes(10))
+        return;
+
+    _lastAutoUnblockAppRequestUtc[exe] = now;
+
+    var localDate = DateTimeOffset.Now.ToString("yyyy-MM-dd");
+    var rid = BuildDeterministicRequestId(childId, AccessRequestType.UnblockApp, exe, localDate);
+
+    var why = reason switch
+    {
+        "deny_list" => "App blocked by deny list",
+        "allow_list" => "App blocked by allow list",
+        "per_app_limit" => "Daily limit reached for this app",
+        _ => "App blocked"
+    };
+
+    _requests.Enqueue(childId, AccessRequestType.UnblockApp, exe, why, requestId: rid);
+}
+
+private static Guid BuildDeterministicRequestId(ChildId childId, AccessRequestType type, string target, string localDate)
+{
+    // RFC4122-ish v5 name-based UUID using SHA-1. Namespace is fixed per request-type.
+    // We only need stability/idempotence, not cryptographic security.
+    var ns = Guid.Parse("b2b1b4a0-2b2a-4c5b-9f59-7b6c2a2c9e21"); // Safe0ne stable namespace
+    var name = $"{childId.Value}|{type}|{(target ?? string.Empty).Trim().ToLowerInvariant()}|{localDate}";
+    return UuidV5(ns, name);
+}
+
+private static Guid UuidV5(Guid @namespace, string name)
+{
+    // Convert namespace UUID to network order bytes.
+    var nsBytes = @namespace.ToByteArray();
+    SwapGuidByteOrder(nsBytes);
+
+    var nameBytes = System.Text.Encoding.UTF8.GetBytes(name ?? string.Empty);
+    var data = new byte[nsBytes.Length + nameBytes.Length];
+    Buffer.BlockCopy(nsBytes, 0, data, 0, nsBytes.Length);
+    Buffer.BlockCopy(nameBytes, 0, data, nsBytes.Length, nameBytes.Length);
+
+    using var sha1 = System.Security.Cryptography.SHA1.Create();
+    var hash = sha1.ComputeHash(data);
+
+    var newGuid = new byte[16];
+    Array.Copy(hash, 0, newGuid, 0, 16);
+
+    // Set version to 5.
+    newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
+    // Set variant to RFC4122.
+    newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
+
+    SwapGuidByteOrder(newGuid);
+    return new Guid(newGuid);
+}
+
+private static void SwapGuidByteOrder(byte[] guid)
+{
+    // .NET Guid uses mixed-endian layout; RFC4122 is network order for the first 3 fields.
+    static void Swap(byte[] g, int a, int b) { (g[a], g[b]) = (g[b], g[a]); }
+    Swap(guid, 0, 3); Swap(guid, 1, 2);
+    Swap(guid, 4, 5);
+    Swap(guid, 6, 7);
+}
+
     private static bool IsEssentialProcess(string exe)
         => exe is "explorer.exe" or "dwm.exe" or "csrss.exe" or "winlogon.exe" or "services.exe" or "lsass.exe";
 
@@ -1426,20 +1483,7 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
                 {
                     p.Kill(entireProcessTree: true);
                     appTracker.RecordBlocked(exe, reason);
-                    // Auto-create an unblock-app request (idempotent) when an app is blocked.
-                    // This complements the child-facing blocked UX button and reduces friction.
-                    try
-                    {
-                        if (string.Equals(kindForUx, "app", StringComparison.OrdinalIgnoreCase)
-                            && (reason == "per_app_limit" || reason == "deny_list" || reason == "allow_list"))
-                        {
-                            var localDate = appTracker.GetLocalDateString();
-                            var rid = BuildDeterministicRequestId(childId, localDate, AccessRequestType.UnblockApp, exe);
-                            _requests.Enqueue(childId, AccessRequestType.UnblockApp, exe, reason: $"Auto request: {reason}", requestId: rid);
-                        }
-                    }
-                    catch { }
-
+                    MaybeAutoRequestUnblockApp(childId, exe, reason);
                     _logger.LogInformation("Terminated process {ProcessName} (pid {Pid}) reason={Reason}", p.ProcessName, p.Id, reason);
 
                     // K7: show the child an explainable screen (best-effort, throttled).
@@ -1456,51 +1500,6 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
                 }
             }
         }
-    }
-
-
-    // Deterministic request id to avoid spamming identical 'More time' requests across restarts.
-    // RFC4122 v5-style (SHA-1) name-based UUID in a fixed namespace.
-    private static Guid BuildDeterministicRequestId(ChildId childId, string localDate, AccessRequestType type, string target)
-    {
-        var name = $"{childId.Value:N}|{localDate}|{(int)type}|{target}";
-
-        // Fixed namespace UUID for Safe0ne child requests (do NOT change once shipped)
-        var ns = Guid.Parse("8f3f9e2b-3c7b-4d4b-9a3b-2e7f2c9d1a55");
-
-        var nsBytes = ns.ToByteArray();
-        SwapGuidByteOrder(nsBytes);
-        var nameBytes = Encoding.UTF8.GetBytes(name);
-
-        var data = new byte[nsBytes.Length + nameBytes.Length];
-        Buffer.BlockCopy(nsBytes, 0, data, 0, nsBytes.Length);
-        Buffer.BlockCopy(nameBytes, 0, data, nsBytes.Length, nameBytes.Length);
-
-        byte[] hash;
-        using (var sha1 = SHA1.Create())
-        {
-            hash = sha1.ComputeHash(data);
-        }
-
-        var newGuid = new byte[16];
-        Array.Copy(hash, 0, newGuid, 0, 16);
-
-        // version 5
-        newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
-        // RFC4122 variant
-        newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
-
-        SwapGuidByteOrder(newGuid);
-        return new Guid(newGuid);
-    }
-
-    // .NET Guid uses mixed-endian fields; RFC4122 name-based UUID algorithm expects network byte order.
-    private static void SwapGuidByteOrder(byte[] guid)
-    {
-        void Swap(int a, int b) { (guid[a], guid[b]) = (guid[b], guid[a]); }
-        Swap(0, 3); Swap(1, 2);
-        Swap(4, 5);
-        Swap(6, 7);
     }
 
 }

@@ -60,7 +60,7 @@
     const scheduleId = "reports-schedule";
     const activityId = "reports-activity";
     const screenId = "reports-screen-time";
-    const webId = "reports-web-filter";
+    const webBlocksId = "reports-web-blocks";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -101,10 +101,10 @@
         if (stRoot) await renderScreenTimeDigest(stRoot, children);
       }catch{}
 
-      // EPIC-WEB-FILTER: render a best-effort digest from SSOT activity signals.
+      // EPIC-ENFORCE-WEB: show web-block events + unblock-site request loop is observable.
       try{
-        const wfRoot = document.getElementById(webId);
-        if (wfRoot) await renderWebFilterDigest(wfRoot, children);
+        const wbRoot = document.getElementById(webBlocksId);
+        if (wbRoot) await renderWebBlocksDigest(wbRoot, children);
       }catch{}
 
       // 16V: Alerts routing config (per child) — best-effort.
@@ -237,9 +237,9 @@
           <div id="${screenId}">${escapeHtml("Loading…")}</div>
         </div>
         <div class="card">
-          <h2>Web filter</h2>
-          <p class="muted">Best-effort web filtering signals from kid devices ("would enforce" + diagnostics). Use this to confirm mode + rule counts are flowing.</p>
-          <div id="${webId}">${escapeHtml("Loading…")}</div>
+          <h2>Web blocks</h2>
+          <p class="muted">When a website is blocked on a kid device, we emit a SSOT activity marker and auto-create an Unblock Site request (best-effort).</p>
+          <div id="${webBlocksId}">${escapeHtml("Loading…")}</div>
         </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
@@ -308,9 +308,9 @@
     `;
   }
 
-  async function renderWebFilterDigest(root, children){
+  async function renderWebBlocksDigest(root, children){
     if (!root) return;
-    root.innerHTML = `<div class="skeleton">Loading web filter…</div>`;
+    root.innerHTML = `<div class="skeleton">Loading web blocks…</div>`;
 
     const sinceMs = Date.now() - (7 * 24 * 60 * 60 * 1000);
     const fromIso = new Date(sinceMs).toISOString();
@@ -319,49 +319,46 @@
     for (const c of (children || [])){
       const id = c && c.id ? String(c.id) : "";
       if (!id) continue;
-      const act = await Safe0neApi.getChildActivityLocal(id, { from: fromIso, take: 200 });
-      if (!act || !act.ok){
-        rows.push({ child: c, err: act && act.error ? act.error : "Unknown" });
+      const res = await Safe0neApi.getChildActivityLocal(id, { from: fromIso, take: 200 });
+      if (!res || !res.ok) {
+        rows.push({ child: c, error: res && res.error ? res.error : "Unknown" });
         continue;
       }
-      const items = Array.isArray(act.data && act.data.items) ? act.data.items : [];
-      const sig = items.find((x) => String(x && x.kind) === "policy_would_enforce_web");
-      rows.push({ child: c, sig: sig || null });
+      const arr = Array.isArray(res.data) ? res.data : (res.data && Array.isArray(res.data.items) ? res.data.items : []);
+      const web = (arr || []).filter(x => String(x && x.kind || "").toLowerCase() === "web_blocked");
+      const byDomain = {};
+      for (const ev of web){
+        try{
+          const d = (ev && ev.details) ? JSON.parse(ev.details) : {};
+          const dom = String(d.domain || "").trim().toLowerCase();
+          if (!dom) continue;
+          byDomain[dom] = (byDomain[dom] || 0) + (Number(d.count) || 1);
+        }catch{}
+      }
+      const domains = Object.keys(byDomain).sort((a,b) => (byDomain[b]||0) - (byDomain[a]||0));
+      const top = domains.length ? `${domains[0]} (${byDomain[domains[0]]||0})` : "—";
+      const total = Object.values(byDomain).reduce((a,b) => a + (Number(b)||0), 0);
+      rows.push({ child: c, total, top });
     }
 
     const html = rows.map(r => {
       const name = escapeHtml(r.child && r.child.name ? r.child.name : "Child");
-      if (r.err){
-        return `<tr><td>${name}</td><td colspan="3" class="muted">${escapeHtml(String(r.err))}</td></tr>`;
+      if (r.error){
+        return `<tr><td>${name}</td><td colspan="2" class="muted">${escapeHtml(String(r.error))}</td></tr>`;
       }
-      const sig = r.sig;
-      if (!sig){
-        return `<tr><td>${name}</td><td colspan="3" class="muted">No web-filter signal in last 7 days.</td></tr>`;
-      }
-      const data = sig.data || {};
-      const mode = escapeHtml(String(data.mode || ""));
-      const rules = Number.isFinite(Number(data.domainRulesCount)) ? String(data.domainRulesCount) : "—";
-      const ss = (data.safeSearch == null) ? "—" : (data.safeSearch ? "On" : "Off");
-      const adult = (data.blockAdult == null) ? "—" : (data.blockAdult ? "On" : "Off");
-      const when = escapeHtml(String(sig.atUtc || ""));
-      return `<tr>
-        <td>${name}</td>
-        <td><span class="badge">${mode || "(unknown)"}</span></td>
-        <td class="muted">rules=${escapeHtml(rules)} · safeSearch=${escapeHtml(ss)} · adult=${escapeHtml(adult)}</td>
-        <td class="muted">${when ? when : ""}</td>
-      </tr>`;
+      const total = Number(r.total)||0;
+      const badge = total > 0 ? `<span class="badge badge--warning">${total}</span>` : `<span class="badge">0</span>`;
+      return `<tr><td>${name}</td><td>${badge}</td><td class="muted">${escapeHtml(String(r.top||"—"))}</td></tr>`;
     }).join("");
 
     root.innerHTML = `
       <div style="overflow:auto">
-        <table class="table" style="min-width:760px">
-          <thead><tr>
-            <th>Child</th><th>Mode</th><th>Signals</th><th>Last event</th>
-          </tr></thead>
-          <tbody>${html || `<tr><td colspan="4" class="muted">No data.</td></tr>`}</tbody>
+        <table class="table" style="min-width:520px">
+          <thead><tr><th>Child</th><th>Blocks (7d)</th><th>Top domain</th></tr></thead>
+          <tbody>${html || `<tr><td colspan="3" class="muted">No data.</td></tr>`}</tbody>
         </table>
       </div>
-      <div class="muted" style="margin-top:8px">Web filtering is best‑effort. Treat this panel as a diagnostics indicator that policy settings are flowing to the Kid device.</div>
+      <div class="muted" style="margin-top:8px">A blocked site triggers an Unblock Site request on the kid device (best-effort). Review in the Requests inbox.</div>
     `;
   }
 

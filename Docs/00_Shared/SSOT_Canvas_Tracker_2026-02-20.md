@@ -240,4 +240,4 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
-- 26W08: EPIC-WEB-FILTER authoring (policy.webFilter.*) + Reports web digest (policy_would_enforce_web) + docs updated.
+- 26W08: EPIC-WEB-FILTER-ENFORCEMENT: web_blocked activity + UnblockSite request loop + kid blocked UX navigation + Reports digest.
