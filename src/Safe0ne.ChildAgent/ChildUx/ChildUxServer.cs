@@ -123,6 +123,7 @@ public sealed class ChildUxServer
                     "/request" => HandleRequest(query),
                     "/blocked" => RenderBlocked(query),
                     "/warning" => RenderWarning(query),
+                    "/emergency" => RenderEmergency(query),
                     "/pair" => RenderPair(query),
                     "/pair/complete" => HandlePair(query),
                     _ => RenderNotFound()
@@ -273,7 +274,59 @@ public sealed class ChildUxServer
                   "<input name='target' placeholder='eg. example.com' style='width:100%;padding:8px;border:1px solid #ddd;border-radius:8px'/>" +
                   "<div style='margin-top:8px'><button type='submit' style='padding:8px 12px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer'>Send</button></div></form>");
         sb.Append("</div>");
+
+        sb.Append("<div class='card'>");
+        sb.Append("<h2 style='margin:0 0 8px 0'>Emergency access</h2>");
+        sb.Append("<div class='muted'>If this is an emergency, you can always access emergency help information.</div>");
+        sb.Append("<div style='margin-top:10px'><a href='/emergency'>Open emergency help</a></div>");
+        sb.Append("</div>");
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
+        sb.Append("</div>");
+
+        sb.Append("</div></body></html>");
+        return sb.ToString();
+    }
+
+    private string RenderEmergency(string query)
+    {
+        var snap = _store.GetSnapshot();
+        var pol = snap.Policy;
+
+        var sb = new StringBuilder();
+        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Emergency</title>");
+        sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .grid{max-width:860px;display:grid;gap:12px;} .card{border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} ul{margin:8px 0 0 20px;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;}</style>");
+        sb.Append("</head><body><div class='grid'>");
+
+        sb.Append("<div class='card'><h1 style='margin:0'>Emergency help</h1><div class='muted'>This page is always available on this device.</div></div>");
+
+        sb.Append("<div class='card'>");
+        sb.Append("<h2 style='margin:0 0 8px 0'>Emergency numbers</h2>");
+        sb.Append("<div>If you are in danger or need urgent help:</div>");
+        sb.Append("<ul>");
+        sb.Append("<li><b>112</b> — Emergency services (EU/UK)</li>");
+        sb.Append("<li><b>911</b> — Emergency services (US/Canada)</li>");
+        sb.Append("</ul>");
+        sb.Append("<div class='muted' style='margin-top:8px'>This Windows prototype cannot place calls for you. Use a phone or ask a trusted adult.</div>");
+        sb.Append("</div>");
+
+        sb.Append("<div class='card'>");
+        sb.Append("<h2 style='margin:0 0 8px 0'>Always allowed</h2>");
+        sb.Append("<div class='muted'>Your parent can mark some essentials as always allowed.</div>");
+
+        var allowedApps = (pol?.AllowedProcessNames ?? Array.Empty<string>()).Take(20).ToArray();
+        var allowedSites = (pol?.WebAllowedDomains ?? Array.Empty<string>()).Take(20).ToArray();
+        sb.Append("<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px'>");
+        sb.Append("<div><b>Apps</b>");
+        sb.Append(RenderListOrEmpty(allowedApps, "(none configured)"));
+        sb.Append("</div>");
+        sb.Append("<div><b>Websites</b>");
+        sb.Append(RenderListOrEmpty(allowedSites, "(none configured)"));
+        sb.Append("</div>");
+        sb.Append("</div>");
+        sb.Append("</div>");
+
+        sb.Append("<div class='card'>");
+        sb.Append("<a href='/today'>&larr; Back to Today</a>");
         sb.Append("</div>");
 
         sb.Append("</div></body></html>");
@@ -357,7 +410,7 @@ public sealed class ChildUxServer
 
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
 
-        sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a></div>");
+        sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a> · <a href='/emergency'>Emergency help</a></div>");
         sb.Append("</div></body></html>");
         return sb.ToString();
     }
