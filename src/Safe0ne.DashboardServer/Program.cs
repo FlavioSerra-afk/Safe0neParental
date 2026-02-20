@@ -437,6 +437,26 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles
 
     return Results.File(path, "application/zip", fileDownloadName: info.FileName);
 });
+
+// Diagnostics bundle history (filesystem-derived): list + download by filename.
+app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles", (Guid childId, int? max, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    var list = cp.ListDiagnosticsBundles(id, max ?? 25).ToList();
+    return Results.Json(new ApiResponse<List<DiagnosticsBundleInfo>>(list, null), JsonDefaults.Options);
+});
+
+app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/diagnostics/bundles/{{fileName}}", (Guid childId, string fileName, JsonFileControlPlane cp) =>
+{
+    var id = new ChildId(childId);
+    if (!cp.TryGetDiagnosticsBundleByFileName(id, fileName, out var path))
+    {
+        return Results.Json(new ApiResponse<string>(null, new ApiError("not_found", "Diagnostics bundle not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
+    }
+
+    var safeName = Path.GetFileName(fileName);
+    return Results.File(path, "application/zip", fileDownloadName: safeName);
+});
 app.MapPut($"/api/{ApiVersions.V1}/children/{{childId:guid}}/policy", async (Guid childId, HttpRequest req, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);

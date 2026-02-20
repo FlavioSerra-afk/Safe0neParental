@@ -146,6 +146,11 @@ const Safe0neApi = {
     return await _get(`/api/v1/children/${encodeURIComponent(childId)}/diagnostics/bundles/latest/info`);
   },
 
+  async getDiagnosticsBundles(childId, max){
+    const m = (max && max > 0) ? max : 25;
+    return await _get(`/api/v1/children/${encodeURIComponent(childId)}/diagnostics/bundles?max=${encodeURIComponent(String(m))}`);
+  },
+
   // Local Mode: Web telemetry/summary (Phase 15D)
   async getChildWebRecentLocal(childId, take){
     const t = (take && take > 0) ? take : 100;

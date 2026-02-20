@@ -1,6 +1,6 @@
 # Feature Registry (SSOT for feature tracking)
 
-Updated: 2026-02-20  
+Updated: 2026-02-17  
 Owner: Repo-wide (Docs-first LAW)
 
 This document is the **single source of truth** for tracking feature delivery status across:
@@ -42,9 +42,10 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-REPORTS | Reports | Reports scheduling (local digest) | 🟢 | Parent: reports scheduling surface + run-now | SSOT: policy.reports + reportsState + activity report_digest | 16W9: local scheduler + endpoints |
 | EPIC-PAIRING | Kid/Devices | Pairing & provisioning (QR/code/deeplink) | 🟡 | Parent: pairing UX + device registry; Kid: pairing endpoint stub | SSOT: device registry + enrollment tokens | 26W08: token metadata persisted (issued/expires/revoked) + TTL enforced + revoke preserves record; **per-device lastSeen tracking + multi-device contract tests** |
 | EPIC-POLICY-SYNC-RUNTIME | Kid Agent | Versioned sync + watchdog + rollback/integrity | 🟡 | Kid agent | Server now surfaces pending/overdue + apply errors via heartbeat status; integrity/self-repair still planned | KFT-006+ |
-| EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | **26W08:** schedule windows now wire end-to-end in Local Mode (Bedtime + School + Homework authoring in Parent profile → agent mapping → effective state + ActiveSchedule). Full “mode precedence + kid UX polish” still in-flight. |
-| EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
-| EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
+| EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
+| EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | ✅ | Kid agent + Requests loop | SSOT: app rules + grants | 26W08: per-app caps enforced (best-effort foreground) + deterministic UnblockApp requests + parent approve/deny grants override |
+| EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | ✅ | Kid agent + Alerts/Reports | SSOT: web rules + events | 26W08: web_blocked activity + UnblockSite request loop + parent Reports digest; circumvention detection still tracked as separate epic |
+| EPIC-DIAGNOSTICS-UPLOAD | Support | Diagnostics bundle: request → kid upload → server history → download | ✅ | Parent: Support page + Child→Devices; Kid: DiagnosticsBundle cmd | SSOT: latest metadata + filesystem bundles | 26W08: PUT /diagnostics/bundles upload + list/history + download; UI history list + per-child drill-through |
 | EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🟡 | Kid UX | `/today` shows pairing + policy version/updated + screen-time + next schedule; `/blocked` explains why + links to request; `/emergency` shows emergency help + always-allowed essentials. Emergency contacts still planned. | Evidence: `src/Safe0ne.ChildAgent/ChildUx/ChildUxServer.cs`, `src/Safe0ne.ChildAgent/ChildUx/ChildStateStore.cs` |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |

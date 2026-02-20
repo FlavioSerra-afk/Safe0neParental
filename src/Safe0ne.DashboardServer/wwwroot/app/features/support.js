@@ -50,7 +50,30 @@
             <div class="kv">
               <span>Download</span>
               <a class="btn" href="/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/latest" download>Download ZIP</a>
-              <a class="btn" href="/api/v1/children/${encodeURIComponent(id)}/diagnostics/supportbundle/latest" download>Support bundle</a>
+            </div>
+          `;
+        }
+
+        // History (filesystem-derived). Keep it small.
+        let historyHtml = ``;
+        const histRes = await Safe0neApi.getDiagnosticsBundles(id, 10);
+        if (histRes.ok && Array.isArray(histRes.data) && histRes.data.length){
+          const rows = histRes.data.slice(0, 10).map(b => {
+            const fn = String(b.fileName || "bundle.zip");
+            const sizeKb = Math.round((b.sizeBytes || 0) / 1024);
+            const created = String(b.createdAtUtc || "");
+            const dl = `/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/${encodeURIComponent(fn)}`;
+            return `<tr><td>${escapeHtml(created)}</td><td>${escapeHtml(fn)}</td><td>${sizeKb} KB</td><td><a class="btn btn--sm" href="${dl}" download>Download</a></td></tr>`;
+          }).join("");
+          historyHtml = `
+            <div class="hr"></div>
+            <h3 style="margin: 10px 0 6px 0;">History</h3>
+            <div class="muted" style="margin-bottom:6px;">Last ${Math.min(10, histRes.data.length)} bundles (newest first).</div>
+            <div style="overflow:auto;">
+              <table class="table">
+                <thead><tr><th>Created</th><th>File</th><th>Size</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
             </div>
           `;
         }
@@ -64,6 +87,7 @@
               <button class="btn" type="button" data-action="request-bundle" data-child-id="${escapeHtmlAttr(id)}">Request</button>
             </div>
             ${infoHtml}
+            ${historyHtml}
           </div>
         `;
       }));

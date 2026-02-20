@@ -152,8 +152,6 @@ function renderPerAppLimitsCard(child, profile) {
         web: true,
         apps: true,
         bedtime: true,
-        school: false,
-        homework: false,
         location: false,
         purchases: false,
       },
@@ -161,10 +159,6 @@ function renderPerAppLimitsCard(child, profile) {
         screenMinutesPerDay: 120,
         bedtimeStart: "21:00",
         bedtimeEnd: "07:00",
-        schoolStart: "09:00",
-        schoolEnd: "15:00",
-        homeworkStart: "17:00",
-        homeworkEnd: "19:00",
       },
       devices: [],
 
@@ -325,8 +319,6 @@ function renderPerAppLimitsCard(child, profile) {
           web: true,
           apps: true,
           bedtime: true,
-        school: false,
-        homework: false,
           location: false,
           purchases: false,
         },
@@ -334,10 +326,6 @@ function renderPerAppLimitsCard(child, profile) {
           screenMinutesPerDay: 120,
           bedtimeStart: "21:00",
           bedtimeEnd: "07:00",
-        schoolStart: "09:00",
-        schoolEnd: "15:00",
-        homeworkStart: "17:00",
-        homeworkEnd: "19:00",
         },
 	        // Local fallback profile (used only when Local API is unavailable).
 	        // Keep it clearly non-demo: this represents "awaiting enrollment" until a device is paired.
@@ -665,6 +653,7 @@ function renderDevicesTab(child) {
             </div>
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="so-btn" data-action="requestDiagnosticsBundle" data-childid="${escapeHtml(id)}" type="button">Request new bundle</button>
+              <a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="#/support?child=${encodeURIComponent(id)}">History</a>
               ${has ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(dl)}" download>Download ZIP</a>` : `<button class="so-btn" data-action="noop" type="button" disabled>Download ZIP</button>`}
             </div>
             <div class="so-card-sub" style="margin-top:8px;">Tip: the Kid device must be online to upload the bundle after you request it.</div>
@@ -1746,8 +1735,6 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
           ${permToggle("web", "Web filtering", profile.permissions.web)}
           ${permToggle("apps", "App controls", profile.permissions.apps)}
           ${permToggle("bedtime", "Bedtime enforcement", profile.permissions.bedtime)}
-          ${permToggle("school", "School window", profile.permissions.school)}
-          ${permToggle("homework", "Homework window", profile.permissions.homework)}
           ${permToggle("location", "Location sharing", profile.permissions.location)}
           ${permToggle("purchases", "Purchases", profile.permissions.purchases)}
         </div>
@@ -1809,20 +1796,6 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
           </div>
           <div class="so-field"><label>Bedtime end</label>
             <input type="time" data-field="bedtimeEnd" value="${escapeHtml(profile.limits.bedtimeEnd)}"/>
-          </div>
-
-          <div class="so-field"><label>School start</label>
-            <input type="time" data-field="schoolStart" value="${escapeHtml(profile.limits.schoolStart || "09:00")}"/>
-          </div>
-          <div class="so-field"><label>School end</label>
-            <input type="time" data-field="schoolEnd" value="${escapeHtml(profile.limits.schoolEnd || "15:00")}"/>
-          </div>
-
-          <div class="so-field"><label>Homework start</label>
-            <input type="time" data-field="homeworkStart" value="${escapeHtml(profile.limits.homeworkStart || "17:00")}"/>
-          </div>
-          <div class="so-field"><label>Homework end</label>
-            <input type="time" data-field="homeworkEnd" value="${escapeHtml(profile.limits.homeworkEnd || "19:00")}"/>
           </div>
         </div>
       </div>
@@ -2896,42 +2869,10 @@ if (action === "requestDiagnosticsBundle") {
           document.querySelector('input[data-field="bedtimeEnd"]')?.value ?? "07:00"
         );
 
-        prof.limits.schoolStart = String(
-          document.querySelector('input[data-field="schoolStart"]')?.value ?? "09:00"
-        );
-        prof.limits.schoolEnd = String(
-          document.querySelector('input[data-field="schoolEnd"]')?.value ?? "15:00"
-        );
-
-        prof.limits.homeworkStart = String(
-          document.querySelector('input[data-field="homeworkStart"]')?.value ?? "17:00"
-        );
-        prof.limits.homeworkEnd = String(
-          document.querySelector('input[data-field="homeworkEnd"]')?.value ?? "19:00"
-        );
-
         // Screen time per-day overrides (optional). Stored under policy.timeBudget.perDayMinutes (Mon..Sun).
         prof.policy = prof.policy || {};
         prof.policy.timeBudget = prof.policy.timeBudget || {};
         prof.policy.timeBudget.dailyMinutes = prof.limits.screenMinutesPerDay;
-
-        // Schedules (K4/P6): expanded surface under policy.timeBudget.schedules.*
-        prof.policy.timeBudget.schedules = prof.policy.timeBudget.schedules || {};
-        prof.policy.timeBudget.schedules.bedtime = {
-          enabled: !!prof.permissions.bedtime,
-          startLocal: prof.limits.bedtimeStart,
-          endLocal: prof.limits.bedtimeEnd,
-        };
-        prof.policy.timeBudget.schedules.school = {
-          enabled: !!prof.permissions.school,
-          startLocal: prof.limits.schoolStart,
-          endLocal: prof.limits.schoolEnd,
-        };
-        prof.policy.timeBudget.schedules.homework = {
-          enabled: !!prof.permissions.homework,
-          startLocal: prof.limits.homeworkStart,
-          endLocal: prof.limits.homeworkEnd,
-        };
 
         const _readDay = (k) => {
           const raw = document.querySelector(`input[data-field="screenMinutes${k}"]`)?.value;

@@ -1,6 +1,6 @@
 # Safe0neParental — SSOT Canvas + Tracker (Docs are LAW)
 
-Updated: 2026-02-20
+Updated: 2026-02-18
 
 ## Scope
 
@@ -181,17 +181,17 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Acceptance: agent reports applied version; server detects overdue; rollback endpoint works.
   - Risks: ⚠️ Cross-app contract risk
 
-- 🟢 Screen time tracking / enforcement
-  - Lives: `ScreenTime/*` + schedule evaluator `ChildUx/ScheduleHelper.cs`
-  - Acceptance: tracks minutes; enforces configured daily limit; grace+warnings honored; **schedule windows (Bedtime + School + Homework) are authored in Parent profile and enforced via effective mode**.
+- 🟡 Screen time tracking / enforcement
+  - Lives: `ScreenTime/*`
+  - Acceptance: tracks minutes; enforces configured daily limit; grace+warnings honored.
 
-- 🟢 App usage tracking / per-app limits
+- 🟡 App usage tracking / per-app limits
   - Lives: `AppUsage/*`
-  - Acceptance: tracks app usage; enforces per-app caps; blocked UX + request loop best-effort.
+  - Acceptance: tracks app usage; enforces per-app caps.
 
-- 🟢 Web filter enforcement + circumvention best-effort
+- 🟡 Web filter enforcement + circumvention best-effort
   - Lives: `WebFilter/*`
-  - Acceptance: blocks domains/categories; logs attempts; circumvention signals to alerts + reports.
+  - Acceptance: blocks domains/categories; logs attempts; circumvention signals to alerts.
 
 - 🟡 Kid UX (Today / Block screens / Why + Request)
   - Lives: `ChildUx/*`
@@ -201,21 +201,16 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
 
 ## Next slices queue (ranked)
 
-1) **Stability Wave:** Canonicalize revoke/token/rollback surfaces
-   - Goal: eliminate signature collisions + ensure single canonical API per behavior.
-   - Touch: `JsonFileControlPlane.EndpointCompat*.cs`, `CryptoAndTokens.cs`, `Tokens.cs`, `/Docs/00_Shared/Legacy-Code-Registry.md`.
-
-2) **Reports:** make scheduling truly functional end-to-end
-   - Register hosted service, ensure SSOT keys stable, add marker test.
-
-3) **Device pairing hardening**
-   - Tighten token TTL/revoke; ensure consistent `childId/deviceId` mappings; add tests.
-
-4) **Kid enforcement completion (incremental)**
-   - Screen time → per-app → web filter.
-
-5) **Migration cleanup**
-   - Remove compiled-out/no-op compat files when registry indicates safe.
+1) **EPIC-POLICY-SYNC-SELF-REPAIR** (agent cache + integrity checks + automatic retry/re-enroll strategy)
+2) **EPIC-WEB-FILTER-CIRCUMVENTION** (VPN/proxy/public DNS signals → alerts + guidance; harden hosts write failure handling)
+3) **EPIC-DEVICE-LIFECYCLE-DEEP** (per-device health panel, last-seen, per-device revoke/unpair flows)
+4) **EPIC-LOCATION-HISTORY** (timeline view + retention controls + export)
+5) **EPIC-NOTIFICATIONS** (parent-side notifications for critical alerts; opt-in)
+6) **EPIC-AUDIT-VIEWER-POLISH** (filters, export, retention controls)
+7) **EPIC-KID-UX-POLISH** (unify blocked screens: screen time/app/web/schedule; “why” + request CTA)
+8) **Migration cleanup** (remove compiled-out/no-op compat when safe + update registry)
+9) **Device pairing hardening** (multi-device contract tests + per-device lastSeen)
+10) **Mobile stubs expansion** (contracts + docs only, no enforcement)
 
 ---
 
@@ -238,3 +233,4 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
+- 26W08: Diagnostics bundle history (filesystem-derived) + download-by-filename endpoint + Support page history table.

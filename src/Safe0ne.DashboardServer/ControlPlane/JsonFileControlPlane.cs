@@ -502,58 +502,7 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 }
             }
 
-            // EPIC-SCREEN-TIME: If we detect a transition into budget depletion, create a best-effort
-            // MoreTime request in the control plane. This complements child-side request UX and ensures
-            // the parent inbox can surface an actionable item even if the kid UX is closed.
-            // NOTE: UpsertStatus runs under _gate; do not call methods that re-lock _gate.
-            try
-            {
-                var prevStatus = _statusByChildGuid.TryGetValue(key, out var priorStatus) ? priorStatus : null;
-                var prevDepleted = prevStatus?.ScreenTimeBudgetDepleted ?? false;
-                if (depleted && !prevDepleted && (limit ?? 0) > 0)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    var windowStart = now.AddMinutes(-2);
-
-                    var exists = _requests
-                        .Where(r => r.ChildId.Value == childId.Value)
-                        .Where(r => r.Status == AccessRequestStatus.Pending)
-                        .Where(r => r.Type == AccessRequestType.MoreTime)
-                        .Where(r => string.Equals(r.Target, "screen_time", StringComparison.OrdinalIgnoreCase))
-                        .Where(r => r.CreatedAtUtc >= windowStart)
-                        .Any();
-
-                    if (!exists)
-                    {
-                        var created = new AccessRequest(
-                            RequestId: Guid.NewGuid(),
-                            ChildId: childId,
-                            Type: AccessRequestType.MoreTime,
-                            Target: "screen_time",
-                            Reason: "Daily screen time limit reached",
-                            CreatedAtUtc: now);
-
-                        _requests.Add(created);
-                        EnsureChildProfileUnsafe_NoLock(childId);
-
-                        try
-                        {
-                            var evt = JsonSerializer.Serialize(new[] { new { kind = "request_created", requestId = created.RequestId, type = created.Type.ToString(), target = created.Target, reason = created.Reason, occurredAtUtc = now.ToString("O") } }, JsonDefaults.Options);
-                            AppendLocalActivityJsonUnsafe_NoLock(childId.Value.ToString(), evt);
-                        }
-                        catch { }
-
-                        PersistUnsafe_NoLock();
-                    }
-                }
-            }
-            catch
-            {
-                // best-effort only
-            }
-
-// K5: apps usage + blocked attempts rollups
-
+            // K5: apps usage + blocked attempts rollups
             var blockedTotal = 0;
             BlockedAttemptItem[]? topBlocked = null;
             AppUsageItem[]? topUsage = null;
@@ -791,6 +740,59 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
             }
             return true;
         }
+    }
+
+    public IReadOnlyList<DiagnosticsBundleInfo> ListDiagnosticsBundles(ChildId childId, int max = 25)
+    {
+        // Intentionally derived from the filesystem so we don't expand the persisted schema.
+        // New bundles are written into the child diagnostics folder as bundle_<stamp>_<name>.
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Safe0ne",
+            "DashboardServer",
+            "diagnostics",
+            childId.Value.ToString());
+
+        if (!Directory.Exists(dir))
+        {
+            return Array.Empty<DiagnosticsBundleInfo>();
+        }
+
+        var files = Directory
+            .EnumerateFiles(dir, "bundle_*", SearchOption.TopDirectoryOnly)
+            .Select(p => new FileInfo(p))
+            .OrderByDescending(fi => fi.CreationTimeUtc)
+            .Take(Math.Clamp(max, 1, 200))
+            .ToList();
+
+        var list = new List<DiagnosticsBundleInfo>(files.Count);
+        foreach (var fi in files)
+        {
+            list.Add(new DiagnosticsBundleInfo(
+                ChildId: childId,
+                CreatedAtUtc: new DateTimeOffset(fi.CreationTimeUtc, TimeSpan.Zero),
+                SizeBytes: fi.Length,
+                FileName: fi.Name));
+        }
+        return list;
+    }
+
+    public bool TryGetDiagnosticsBundleByFileName(ChildId childId, string fileName, out string fullPath)
+    {
+        fullPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+
+        var safeName = Path.GetFileName(fileName);
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Safe0ne",
+            "DashboardServer",
+            "diagnostics",
+            childId.Value.ToString());
+        var path = Path.Combine(dir, safeName);
+        if (!File.Exists(path)) return false;
+        fullPath = path;
+        return true;
     }
 
 
