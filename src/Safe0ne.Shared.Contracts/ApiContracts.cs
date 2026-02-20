@@ -114,7 +114,12 @@ public sealed record TamperSignals(
     bool EnforcementError = false,
     string? LastError = null,
     DateTimeOffset? LastErrorAtUtc = null,
-    string[]? Notes = null);
+    string[]? Notes = null,
+    // 26W08: policy sync self-repair / health (privacy-first)
+    int ConsecutiveHeartbeatFailures = 0,
+    int ConsecutivePolicyFetchFailures = 0,
+    bool AuthRejected = false,
+    DateTimeOffset? AuthRejectedAtUtc = null);
 
 /// <summary>
 /// Child Agent -> Control Plane heartbeat.

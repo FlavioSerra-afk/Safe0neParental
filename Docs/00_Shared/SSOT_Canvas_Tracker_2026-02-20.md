@@ -241,3 +241,7 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
 - 26W08: EPIC-WEB-FILTER-ENFORCEMENT: web_blocked activity + UnblockSite request loop + kid blocked UX navigation + Reports digest.
+- 26W08: EPIC-APP-USAGE-ENFORCEMENT: per-app caps enforcement (best-effort foreground) + deterministic UnblockApp requests.
+- 26W08: EPIC-SCHEDULE-WINDOWS: School/Homework authoring → mapping → ActiveSchedule surfaced.
+- 26W08: EPIC-DIAGNOSTICS-UPLOAD: bundle upload + history list + download-by-filename.
+- 26W08: EPIC-POLICY-SYNC-SELF-REPAIR: bounded backoff + health counters (heartbeat/policy fetch) surfaced in TamperSignals.

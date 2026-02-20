@@ -186,6 +186,21 @@ if (auth?.DeviceToken is not null)
                         policySurface = pol;
                 }
 
+                // 26W08: policy sync self-repair health (best-effort)
+                var syncHealth = PolicySyncHealthStore.Load(childId);
+                if (localPolicyEnvRes?.Ok == true)
+                {
+                    syncHealth = syncHealth with
+                    {
+                        ConsecutivePolicyFetchFailures = 0,
+                        LastPolicyFetchOkAtUtc = DateTimeOffset.UtcNow
+                    };
+                }
+                else
+                {
+                    syncHealth = syncHealth with { ConsecutivePolicyFetchFailures = Math.Min(99, syncHealth.ConsecutivePolicyFetchFailures + 1) };
+                }
+
 
                 // 16W14: replay protection. Ignore older policy versions than what we already applied.
                 // This prevents a stale local server state (or a reboot) from rolling the kid back to an older policy.
@@ -622,11 +637,17 @@ if (auth?.DeviceToken is not null)
                     BudgetDepleted: depleted);
 
 
+                var authRejected = syncHealth.AuthRejectedAtUtc is not null && (nowUtc - syncHealth.AuthRejectedAtUtc.Value) < TimeSpan.FromHours(6);
                 var tamper = new TamperSignals(
                     NotRunningElevated: OperatingSystem.IsWindows() && !IsRunningElevatedWindows(),
                     EnforcementError: _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30),
                     LastError: _lastEnforcementError,
-                    LastErrorAtUtc: _lastEnforcementErrorAtUtc);
+                    LastErrorAtUtc: _lastEnforcementErrorAtUtc,
+                    Notes: null,
+                    ConsecutiveHeartbeatFailures: syncHealth.ConsecutiveHeartbeatFailures,
+                    ConsecutivePolicyFetchFailures: syncHealth.ConsecutivePolicyFetchFailures,
+                    AuthRejected: authRejected,
+                    AuthRejectedAtUtc: syncHealth.AuthRejectedAtUtc);
                 // Build the strongly-typed heartbeat envelope (contracts are additive-only).
                 // 16W19: also report the last policy we actually applied, and any best-effort apply failure signal.
 
@@ -686,15 +707,32 @@ if (auth?.DeviceToken is not null)
                 if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     _logger.LogWarning("Heartbeat rejected (401). This child has paired devices; run pairing (SAFEONE_PAIR_CODE). ");
+
+                    syncHealth = syncHealth with
+                    {
+                        ConsecutiveHeartbeatFailures = Math.Min(99, syncHealth.ConsecutiveHeartbeatFailures + 1),
+                        AuthRejectedAtUtc = DateTimeOffset.UtcNow
+                    };
                 }
                 else if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Heartbeat failed: HTTP {Status}", (int)resp.StatusCode);
+
+                    syncHealth = syncHealth with { ConsecutiveHeartbeatFailures = Math.Min(99, syncHealth.ConsecutiveHeartbeatFailures + 1) };
                 }
                 else
                 {
                     _logger.LogDebug("Heartbeat ok");
+
+                    syncHealth = syncHealth with
+                    {
+                        ConsecutiveHeartbeatFailures = 0,
+                        LastHeartbeatOkAtUtc = DateTimeOffset.UtcNow
+                    };
                 }
+
+                // Persist self-repair health state (best-effort).
+                PolicySyncHealthStore.Save(childId, syncHealth);
             
 
                 await PollAndAckCommandsAsync(client, childId, stoppingToken);
@@ -704,7 +742,24 @@ if (auth?.DeviceToken is not null)
                 _logger.LogWarning(ex, "Heartbeat loop error");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            // 26W08: bounded exponential backoff + jitter to avoid retry storms.
+            var failures = 0;
+            try
+            {
+                var cid = AgentAuthStore.LoadCurrentChildId();
+                if (cid is not null)
+                {
+                    var h = PolicySyncHealthStore.Load(cid);
+                    failures = Math.Max(h.ConsecutiveHeartbeatFailures, h.ConsecutivePolicyFetchFailures);
+                }
+            }
+            catch { }
+
+            const int baseDelaySec = 5;
+            var cappedPow = Math.Min(4, failures);
+            var backoffSec = failures <= 0 ? baseDelaySec : Math.Min(60, baseDelaySec * (int)Math.Pow(2, cappedPow));
+            var jitterMs = failures <= 0 ? 0 : Random.Shared.Next(0, 3000);
+            await Task.Delay(TimeSpan.FromSeconds(backoffSec) + TimeSpan.FromMilliseconds(jitterMs), stoppingToken);
         }
     }
 
