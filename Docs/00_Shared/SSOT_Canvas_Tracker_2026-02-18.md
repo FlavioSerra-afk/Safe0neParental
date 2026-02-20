@@ -1,6 +1,6 @@
 # Safe0neParental — SSOT Canvas + Tracker (Docs are LAW)
 
-Updated: 2026-02-18
+Updated: 2026-02-20
 
 ## Scope
 

@@ -677,6 +677,205 @@ function renderDevicesTab(child) {
     </div>`;
 }
 
+
+function renderHealthTab(child) {
+  const id = String(child?.id || "");
+  const useApi = !!state?.api?.available && isGuid(id);
+  const st = useApi ? state.api.statusByChildId[id] : null;
+  const diagInfo = useApi ? state.api.diagnosticsInfoByChildId[id] : null;
+  const devs = useApi ? state.api.devicesByChildId[id] : null;
+
+  // Async hydrate (never blocks render)
+  if (useApi && !state.statusLoaded[id]) {
+    state.statusLoaded[id] = true;
+    setTimeout(() => {
+      Promise.resolve(refreshStatusFromApi(id))
+        .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+        .catch(() => {});
+    }, 0);
+  }
+  if (useApi && !state.devicesLoaded[id]) {
+    state.devicesLoaded[id] = true;
+    setTimeout(() => {
+      Promise.resolve(refreshDevicesFromApi(id))
+        .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+        .catch(() => {});
+    }, 0);
+  }
+  if (useApi && !state.diagnosticsLoaded[id]) {
+    state.diagnosticsLoaded[id] = true;
+    setTimeout(() => {
+      Promise.resolve(refreshDiagnosticsInfoFromApi(id))
+        .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+        .catch(() => {});
+    }, 0);
+  }
+
+  function kv(k, v){
+    return `<div class="kv"><span>${escapeHtml(k)}</span><span>${v}</span></div>`;
+  }
+  function pill(text, cls){
+    return `<span class="so-pill ${escapeHtml(cls || 'so-pill--muted')}">${escapeHtml(text)}</span>`;
+  }
+
+  // Connectivity
+  const lastSeen = st?.lastHeartbeatUtc || st?.lastSeenUtc || null;
+  let onlinePill = pill("Unknown", "so-pill--muted");
+  if (lastSeen) {
+    const ms = parseUtcMs(String(lastSeen));
+    if (Number.isFinite(ms)) {
+      const ageMs = Date.now() - ms;
+      onlinePill = (ageMs <= (3 * 60 * 1000))
+        ? pill("Online", "so-pill--success")
+        : pill("Offline", "so-pill--warning");
+    }
+  } else if (useApi && st === null) {
+    onlinePill = pill("Never seen", "so-pill--muted");
+  }
+
+  // Policy sync / watchdog
+  const pv = (st?.policyVersion ?? st?.policyVersion?.value ?? st?.policyVersionNumber ?? null);
+  const lastApplied = st?.lastAppliedPolicyVersion ?? null;
+  const pendingSince = st?.policyApplyPendingSinceUtc ?? null;
+  const overdue = !!st?.policyApplyOverdue;
+  const applyState = st?.policyApplyState ? String(st.policyApplyState) : "";
+  const lkg = st?.lastKnownGoodPolicyVersion ?? null;
+
+  const rollbackVer = st?.recommendedRollbackPolicyVersion ?? null;
+  const rollbackWhy = st?.recommendedRollbackReason ? String(st.recommendedRollbackReason) : "";
+  const rollbackAt = st?.recommendedRollbackGeneratedAtUtc ?? null;
+
+  const policyCard = `
+    <div class="card" style="margin-top:12px;background:#ffffff;border:1px solid rgba(148,163,184,.25);">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="font-weight:900;">Policy sync</div>
+        <div class="so-card-sub">SSOT ↔ Agent apply status</div>
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+        ${kv("Policy version (SSOT)", `<strong>${escapeHtml(pv !== null && pv !== undefined ? String(pv) : "—")}</strong>`)}
+        ${kv("Last applied (Agent)", escapeHtml(lastApplied !== null && lastApplied !== undefined ? String(lastApplied) : "—"))}
+        ${kv("Apply state", escapeHtml(applyState || "—"))}
+        ${kv("Pending since", escapeHtml(pendingSince ? new Date(pendingSince).toLocaleString() : "—"))}
+        ${kv("Overdue", overdue ? `<span class="so-pill so-pill--warning">Yes</span>` : `<span class="so-pill so-pill--success">No</span>`)}
+        ${kv("Last known good (server)", escapeHtml(lkg !== null && lkg !== undefined ? String(lkg) : "—"))}
+      </div>
+      ${(rollbackVer !== null && rollbackVer !== undefined) ? `
+        <div class="so-banner-warn" style="margin-top:12px;">
+          <strong>Rollback recommended:</strong> v${escapeHtml(String(rollbackVer))}${rollbackWhy ? ` — ${escapeHtml(rollbackWhy)}` : ""}${rollbackAt ? ` (${escapeHtml(new Date(rollbackAt).toLocaleString())})` : ""}
+          <div class="so-card-sub" style="margin-top:6px;">You can roll back from the child policy screen if this persists.</div>
+        </div>` : ``}
+    </div>
+  `;
+
+  // Screen time
+  const limit = st?.screenTimeLimitMinutes;
+  const used = st?.screenTimeUsedMinutes;
+  const rem = st?.screenTimeRemainingMinutes;
+  const depleted = !!st?.screenTimeBudgetDepleted;
+
+  const stCard = `
+    <div class="card" style="margin-top:12px;background:#ffffff;border:1px solid rgba(148,163,184,.25);">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="font-weight:900;">Screen time</div>
+        <div>${depleted ? `<span class="so-pill so-pill--warning">Depleted</span>` : `<span class="so-pill so-pill--muted">OK</span>`}</div>
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+        ${kv("Limit", escapeHtml((limit !== null && limit !== undefined) ? `${limit} min/day` : "—"))}
+        ${kv("Used", escapeHtml((used !== null && used !== undefined) ? `${used} min` : "—"))}
+        ${kv("Remaining", escapeHtml((rem !== null && rem !== undefined) ? `${rem} min` : "—"))}
+      </div>
+      <div class="so-card-sub" style="margin-top:8px;">Best-effort rollup from the Kid device heartbeat.</div>
+    </div>
+  `;
+
+  // Devices summary
+  const list = Array.isArray(devs) ? devs : [];
+  const active = list.filter(d => !d?.tokenRevoked && !d?.tokenRevokedAtUtc).length;
+  const revoked = list.filter(d => !!(d?.tokenRevoked || d?.tokenRevokedAtUtc)).length;
+  const expired = list.filter(d => !!(d?.tokenExpired || (d?.tokenExpiresAtUtc && (new Date(d.tokenExpiresAtUtc)).getTime() <= Date.now()))).length;
+
+  const devicesCard = `
+    <div class="card" style="margin-top:12px;background:#ffffff;border:1px solid rgba(148,163,184,.25);">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="font-weight:900;">Devices</div>
+        <div class="so-card-sub">${escapeHtml(list.length ? `${list.length} enrolled` : "No enrolled devices")}</div>
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+        <div class="card" style="padding:12px;border:1px solid rgba(148,163,184,.25);">
+          <div class="so-card-sub">Active</div>
+          <div style="font-weight:900;font-size:18px;margin-top:4px;">${escapeHtml(String(active))}</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid rgba(148,163,184,.25);">
+          <div class="so-card-sub">Revoked</div>
+          <div style="font-weight:900;font-size:18px;margin-top:4px;">${escapeHtml(String(revoked))}</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid rgba(148,163,184,.25);">
+          <div class="so-card-sub">Expired</div>
+          <div style="font-weight:900;font-size:18px;margin-top:4px;">${escapeHtml(String(expired))}</div>
+        </div>
+      </div>
+      <div class="so-card-sub" style="margin-top:8px;">For per-device actions (revoke/unpair), use the Devices tab.</div>
+    </div>
+  `;
+
+  // Diagnostics summary
+  const hasDiag = !!diagInfo;
+  const createdAt = hasDiag && diagInfo.createdAtUtc ? new Date(diagInfo.createdAtUtc).toLocaleString() : "—";
+  const sizeKb = hasDiag ? Math.round(((diagInfo.sizeBytes || 0) / 1024)) : 0;
+  const fileName = hasDiag ? String(diagInfo.fileName || "diagnostics.zip") : "diagnostics.zip";
+  const dl = `/api/v1/children/${encodeURIComponent(id)}/diagnostics/bundles/latest`;
+
+  const diagCard = useApi ? `
+    <div class="card" style="margin-top:12px;background:#ffffff;border:1px solid rgba(148,163,184,.25);">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="font-weight:900;">Diagnostics</div>
+        <div class="so-card-sub">Privacy-first support bundle</div>
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+        ${kv("Latest bundle", escapeHtml(hasDiag ? `${createdAt} (${sizeKb} KB)` : "None yet"))}
+        ${kv("File name", escapeHtml(fileName))}
+      </div>
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+        <button class="so-btn" data-action="requestDiagnosticsBundle" data-childid="${escapeHtml(id)}" type="button">Request new bundle</button>
+        ${hasDiag ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(dl)}" download>Download ZIP</a>` : `<button class="so-btn" type="button" disabled>Download ZIP</button>`}
+      </div>
+    </div>
+  ` : ``;
+
+  const top = `
+    <div class="card" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:900;font-size:18px;">Health</div>
+          <div class="so-card-sub" style="margin-top:4px;">Single-pane view of device status, policy sync, and diagnostics.</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <div>${onlinePill}</div>
+          <button class="so-btn" data-action="refreshHealth" data-childid="${escapeHtml(id)}" type="button">Refresh</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+        ${kv("Last seen", escapeHtml(lastSeen ? new Date(lastSeen).toLocaleString() : "—"))}
+        ${kv("Device name", escapeHtml(st?.deviceName ? String(st.deviceName) : "—"))}
+        ${kv("Agent version", escapeHtml(st?.agentVersion ? String(st.agentVersion) : "—"))}
+        ${kv("Mode", escapeHtml(st?.effectiveMode ? String(st.effectiveMode) : (st?.effectiveModeName ? String(st.effectiveModeName) : "—")))}
+        ${kv("Reason", escapeHtml(st?.reasonCode ? String(st.reasonCode) : "—"))}
+      </div>
+    </div>
+  `;
+
+  if (!useApi){
+    return `
+      <div class="card" style="margin-top:14px;">
+        <div style="font-weight:900;font-size:18px;">Health</div>
+        <div class="so-card-sub" style="margin-top:8px;">Health is available in Local Mode when the DashboardServer API is reachable.</div>
+      </div>`;
+  }
+
+  return `${top}${policyCard}${stCard}${devicesCard}${diagCard}`;
+}
+
+
   function renderRequestsTab(child) {
     const prof = ensureProfile(child);
     const reqs = Array.isArray(prof.requests) ? prof.requests : [];
@@ -1718,6 +1917,7 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
       <div class="cp-tabs" role="tablist" aria-label="Child profile tabs" style="margin-top:14px;">
         <button class="cp-tab ${tab === 'settings' ? 'active' : ''}" data-action="setChildTab" data-childid="${escapeHtml(child.id)}" data-tab="settings" type="button">Settings</button>
         <button class="cp-tab ${tab === 'devices' ? 'active' : ''}" data-action="setChildTab" data-childid="${escapeHtml(child.id)}" data-tab="devices" type="button">Devices</button>
+        <button class=\"cp-tab ${tab === 'health' ? 'active' : ''}\" data-action=\"setChildTab\" data-childid=\"${escapeHtml(child.id)}\" data-tab=\"health\" type=\"button\">Health</button>
         <button class="cp-tab ${tab === 'requests' ? 'active' : ''}" data-action="setChildTab" data-childid="${escapeHtml(child.id)}" data-tab="requests" type="button">Requests</button>
         <button class="cp-tab ${tab === 'activity' ? 'active' : ''}" data-action="setChildTab" data-childid="${escapeHtml(child.id)}" data-tab="activity" type="button">Activity</button>
         <button class="cp-tab ${tab === 'location' ? 'active' : ''}" data-action="setChildTab" data-childid="${escapeHtml(child.id)}" data-tab="location" type="button">Location</button>
@@ -1816,6 +2016,10 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
 
       <div class="cp-panel ${tab === 'devices' ? 'active' : ''}" data-tab="devices">
         ${renderDevicesTab(child)}
+      </div>
+
+      <div class=\"cp-panel ${tab === 'health' ? 'active' : ''}\" data-tab=\"health\">
+        ${renderHealthTab(child)}
       </div>
 
       <div class="cp-panel ${tab === 'requests' ? 'active' : ''}" data-tab="requests">

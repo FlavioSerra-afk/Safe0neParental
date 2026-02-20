@@ -67,7 +67,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-LOC-001 | Location | Geofence overlay UX in child profile | Win✅ | ✅ | PATCH_16U13 → 16U13d |
 | P-LOC-002 | Location | Geofence transitions emitted as Alerts/Activity | Win✅ | ✅ | PATCH_16U15 |
 | P-DEVPAIR-001 | Devices | Pair/assign devices to child | Win✅ | 🟡 | 26W08: pairing endpoints stable; device list returns token metadata (issued/expires/revoked) and TTL is enforced; **per-device lastSeen tracked**; **unpair requires typed confirmation**; multi-device workflows covered by contract tests; QR polish still pending. |
-| P-HEALTH-001 | Devices | Device health (heartbeat/last seen) | Win✅ | 🟡 | 26W08: basic status endpoint + child-card Protection badge; per-device diagnostics bundle + richer health view still pending. |
+| P-HEALTH-001 | Devices | Device health (heartbeat/last seen) | Win✅ | 🟡 |  26W08: consolidated 'Health' tab in child profile (policy sync + status + diagnostics summary) built on /status + /devices + diagnostics info. Per-device deep health + diagnostics packaging pipeline still pending. |
 | P-HEALTH-002 | Devices | Screen time rollup surfaced in child cards + profile header | Win✅ | ✅ | 26W08: uses ChildAgentStatus.ScreenTime* fields (remaining/used/limit) when available; safe placeholder otherwise. |
 | P-ANTITAMPER-001 | Security | Anti-tamper resilience (stubs) | Win✅ | 🟡 | 16W15–16W17: tamper/circumvention surfaced + alerts + policy gates; enforcement/self-repair still TBD. |
 | P-AUDIT-001 | Compliance | Append-only audit log for policy changes | Win✅ | 🟢 | 26W08: Implemented SSOT-backed audit stream + endpoint + UI viewer (Admin → Audit Log). |
