@@ -623,7 +623,7 @@ if (auth?.DeviceToken is not null)
 
 
 			        // K4/K5: enforce (best-effort)
-			        TryEnforce(enforcedMode, policy, depleted, bedtimeActive, foregroundExe, appTracker, effective?.ActiveGrants, ref lastLockAttemptUtc, ref _lastUxNavigateUtc);
+			        TryEnforce(childId, enforcedMode, policy, depleted, bedtimeActive, foregroundExe, appTracker, effective?.ActiveGrants, ref lastLockAttemptUtc, ref _lastUxNavigateUtc);
 
                 // K7: publish a lightweight snapshot for the local child UX.
                 var usedTs = TimeSpan.FromSeconds(Math.Max(0, tick.UsedSecondsToday));
@@ -1237,7 +1237,7 @@ if (profile.TryGetProperty("policy", out var pol2) && pol2.ValueKind == JsonValu
     }
 
 
-private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budgetDepleted, bool bedtimeActive, string? foregroundExe, AppUsageTracker appTracker, Grant[]? activeGrants, ref DateTimeOffset lastLockAttemptUtc, ref DateTimeOffset lastUxNavigateUtc)
+private void TryEnforce(ChildId childId, SafetyMode enforcedMode, ChildPolicy? policy, bool budgetDepleted, bool bedtimeActive, string? foregroundExe, AppUsageTracker appTracker, Grant[]? activeGrants, ref DateTimeOffset lastLockAttemptUtc, ref DateTimeOffset lastUxNavigateUtc)
     {
         try
         {
@@ -1266,7 +1266,7 @@ private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budge
 
                 if (deniedToEnforce.Count > 0)
                 {
-                    TryKillProcesses(deniedToEnforce, reason: "deny_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(childId, deniedToEnforce, reason: "deny_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
             }
 
@@ -1286,7 +1286,7 @@ private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budge
                     var usedSec = appTracker.GetUsedSecondsTodayFor(fg);
                     if (usedSec >= (limit.LimitMinutes * 60))
                     {
-                        TryKillProcesses(new[] { fg }, reason: "per_app_limit", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                        TryKillProcesses(childId, new[] { fg }, reason: "per_app_limit", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                     }
                 }
             }
@@ -1305,7 +1305,7 @@ private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budge
 
                 if (!IsEssentialProcess(fg) && !allowed.Any(a => NormalizeExe(a) == fg))
                 {
-                    TryKillProcesses(new[] { fg }, reason: "allow_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(childId, new[] { fg }, reason: "allow_list", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
             }
 
@@ -1316,7 +1316,7 @@ private void TryEnforce(SafetyMode enforcedMode, ChildPolicy? policy, bool budge
             {
                 if (denied.Count == 0)
                 {
-                    TryKillProcesses(new[] { "notepad.exe" }, reason: "lockdown_default", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
+                    TryKillProcesses(childId, new[] { "notepad.exe" }, reason: "lockdown_default", appTracker: appTracker, kindForUx: "app", ref lastUxNavigateUtc);
                 }
 
                 if (budgetDepleted || bedtimeActive)
@@ -1411,7 +1411,7 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
         return n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? n : (n + ".exe");
     }
 
-    private void TryKillProcesses(IEnumerable<string> processNames, string reason, AppUsageTracker appTracker, string kindForUx, ref DateTimeOffset lastUxNavigateUtc)
+    private void TryKillProcesses(ChildId childId, IEnumerable<string> processNames, string reason, AppUsageTracker appTracker, string kindForUx, ref DateTimeOffset lastUxNavigateUtc)
     {
         foreach (var raw in processNames)
         {
@@ -1426,6 +1426,20 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
                 {
                     p.Kill(entireProcessTree: true);
                     appTracker.RecordBlocked(exe, reason);
+                    // Auto-create an unblock-app request (idempotent) when an app is blocked.
+                    // This complements the child-facing blocked UX button and reduces friction.
+                    try
+                    {
+                        if (string.Equals(kindForUx, "app", StringComparison.OrdinalIgnoreCase)
+                            && (reason == "per_app_limit" || reason == "deny_list" || reason == "allow_list"))
+                        {
+                            var localDate = appTracker.GetLocalDateString();
+                            var rid = BuildDeterministicRequestId(childId, localDate, AccessRequestType.UnblockApp, exe);
+                            _requests.Enqueue(childId, AccessRequestType.UnblockApp, exe, reason: $"Auto request: {reason}", requestId: rid);
+                        }
+                    }
+                    catch { }
+
                     _logger.LogInformation("Terminated process {ProcessName} (pid {Pid}) reason={Reason}", p.ProcessName, p.Id, reason);
 
                     // K7: show the child an explainable screen (best-effort, throttled).

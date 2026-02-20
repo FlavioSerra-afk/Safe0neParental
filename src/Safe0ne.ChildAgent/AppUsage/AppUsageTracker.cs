@@ -74,6 +74,13 @@ public sealed class AppUsageTracker
         return s.UsedSecondsByProcess.TryGetValue(key, out var v) ? v : 0;
     }
 
+    public string GetLocalDateString()
+    {
+        var s = Load();
+        if (s is not null && !string.IsNullOrWhiteSpace(s.LocalDate)) return s.LocalDate;
+        return DateTimeOffset.UtcNow.ToLocalTime().ToString("yyyy-MM-dd");
+    }
+
     public AppUsageReport BuildReport(int maxUsageItems = 8, int maxBlockedItems = 8)
     {
         var s = Load() ?? new State(

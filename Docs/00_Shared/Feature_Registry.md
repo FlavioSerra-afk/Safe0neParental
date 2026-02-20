@@ -58,3 +58,15 @@ This document is the **single source of truth** for tracking feature delivery st
 4. Ensure marker/self-tests remain green.
 
 - 🟡 ENG: ControlPlane partial split — extracted Policy domain to JsonFileControlPlane.Policy.cs (seed)
+
+
+## EPIC-APP-USAGE
+
+Status: 🟢 Implemented (Windows-first best effort)
+
+Includes:
+- Parent policy editor for per-app daily limits (process name + minutes)
+- Agent app usage tracking + per-app enforcement (foreground kill)
+- Child blocked UX with request-unblock button
+- Auto-created unblock-app request on app block (idempotent)
+- Reports UI digest (top used + blocked attempts)

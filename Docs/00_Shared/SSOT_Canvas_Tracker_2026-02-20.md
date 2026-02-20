@@ -185,7 +185,7 @@ LKG snapshot written on Local Mode policy PUT/PATCH (`lastKnownGood.profile`).
   - Lives: `src/Safe0ne.ChildAgent/ScreenTime/*`, `src/Safe0ne.ChildAgent/HeartbeatWorker.cs`, `src/Safe0ne.DashboardServer/ControlPlane/JsonFileControlPlane.cs`, UI `wwwroot/app/features/children.js` + `reports.js`
   - Acceptance: Parent can save daily limit/+grace/+warn thresholds; policyVersion bumps; agent enforces daily limit; depleted triggers blocked UX; MoreTime request is created (kid UI + best-effort auto); parent can approve/deny; status rollup shows used/remaining; Reports page shows digest.
 
-- 🟡 App usage tracking / per-app limits
+- 🟢 App usage tracking / per-app limits
   - Lives: `AppUsage/*`
   - Acceptance: tracks app usage; enforces per-app caps.
 

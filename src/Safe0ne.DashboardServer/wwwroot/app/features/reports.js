@@ -60,6 +60,7 @@
     const scheduleId = "reports-schedule";
     const activityId = "reports-activity";
     const screenId = "reports-screen-time";
+    const appUsageId = "reports-app-usage";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -98,6 +99,12 @@
       try{
         const stRoot = document.getElementById(screenId);
         if (stRoot) await renderScreenTimeDigest(stRoot, children);
+      }catch{}
+
+      // EPIC-APP-USAGE: render a quick app usage digest panel from agent status rollups.
+      try{
+        const auRoot = document.getElementById(appUsageId);
+        if (auRoot) await renderAppUsageDigest(auRoot, children);
       }catch{}
 
       // 16V: Alerts routing config (per child) — best-effort.
@@ -229,6 +236,11 @@
           <p class="muted">Budget status reported by the kid agent (privacy-first rollup). If a limit is reached, a More Time request is auto-created.</p>
           <div id="${screenId}">${escapeHtml("Loading…")}</div>
         </div>
+        <div class="card">
+          <h2>App usage</h2>
+          <p class="muted">Top apps used today and blocked attempts (privacy-first rollups). If an app is blocked, an Unblock App request can be created.</p>
+          <div id="${appUsageId}">${escapeHtml("Loading…")}</div>
+        </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
     `;
@@ -294,6 +306,67 @@
       </div>
       <div class="muted" style="margin-top:8px">If a child hits their daily limit, the kid device shows a blocked screen and can request more time. Requests appear in the Requests inbox.</div>
     `;
+  }
+
+
+  async function renderAppUsageDigest(root, children){
+    if (!root) return;
+    root.innerHTML = `<div class="skeleton">Loading app usage…</div>`;
+
+    const rows = [];
+    for (const c of (children || [])){
+      const id = c && c.id ? String(c.id) : "";
+      if (!id) continue;
+      const st = await Safe0neApi.getChildStatus(id);
+      if (st && st.ok){
+        rows.push({ child: c, status: st.data || {} });
+      }else{
+        rows.push({ child: c, status: { _error: (st && st.error) ? st.error : "Unknown" } });
+      }
+    }
+
+    function fmt(sec){
+      const s = Number(sec || 0);
+      const mins = Math.round(s / 60);
+      return `${mins}m`;
+    }
+
+    const html = rows.map(r => {
+      const name = escapeHtml(r.child && r.child.name ? r.child.name : "Child");
+      const s = r.status || {};
+      if (s._error){
+        return `<div class="notice notice--warning" style="margin-bottom:10px"><b>${name}</b><div class="muted">${escapeHtml(String(s._error))}</div></div>`;
+      }
+
+      const usage = Array.isArray(s.topAppUsage) ? s.topAppUsage : [];
+      const blocked = Array.isArray(s.topBlockedApps) ? s.topBlockedApps : [];
+
+      const usageHtml = usage.length
+        ? `<ul>` + usage.slice(0,8).map(u => `<li><b>${escapeHtml(u.processName || "")}</b> <span class="muted">${fmt(u.usedSecondsToday)}</span></li>`).join('') + `</ul>`
+        : `<div class="muted">No app usage yet today.</div>`;
+
+      const blockedHtml = blocked.length
+        ? `<ul>` + blocked.slice(0,8).map(b => `<li><b>${escapeHtml(b.processName || "")}</b> <span class="muted">x${escapeHtml(b.count ?? 0)} (${escapeHtml(b.reason || "blocked")})</span></li>`).join('') + `</ul>`
+        : `<div class="muted">No blocked attempts recorded.</div>`;
+
+      return `
+        <div class="card" style="padding:14px;margin-bottom:10px">
+          <div style="font-weight:800">${name}</div>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:8px">
+            <div>
+              <div style="font-weight:700">Top used</div>
+              ${usageHtml}
+            </div>
+            <div>
+              <div style="font-weight:700">Blocked attempts</div>
+              ${blockedHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    root.innerHTML = html || `<div class="notice">No data.</div>`;
   }
 
   NS.render = renderReports;
