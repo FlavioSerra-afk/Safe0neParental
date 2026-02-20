@@ -2,6 +2,8 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Linq;
 using System.Text.Json;
+using System.Text;
+using System.Security.Cryptography;
 using System.Diagnostics;
 using System.Security.Principal;
 using Microsoft.Extensions.Hosting;
@@ -537,8 +539,22 @@ if (auth?.DeviceToken is not null)
                         App: foregroundExe,
                         Details: JsonSerializer.Serialize(new { usedSecondsToday = tick.UsedSecondsToday, dailyLimitMinutes = limitMins, extraMinutes = extraMins, reason = "daily_budget" }, JsonDefaults.Options),
                         DeviceId: auth?.DeviceId.ToString()));
+
+                    // K8/P11 + EPIC-SCREEN-TIME: when daily budget is first depleted, auto-queue a MoreTime request
+                    // so the parent can approve without the child needing to hunt for the request UI.
+                    // Guard: do not spam when extra minutes are already granted (extraMins > 0).
+                    try
+                    {
+                        if ((limitMins ?? 0) > 0 && extraMins <= 0)
+                        {
+                            var rid = BuildDeterministicRequestId(childId, tick.LocalDate, AccessRequestType.MoreTime, "screen_time");
+                            _requests.Enqueue(childId, AccessRequestType.MoreTime, "screen_time", "Daily screen time limit reached", rid);
+                        }
+                    }
+                    catch { /* best effort */ }
                 }
                 else if (!depleted && lastDepleted)
+
                 {
                     lastDepleted = false;
                     activityOutbox ??= new ActivityOutbox(childId);
@@ -1426,6 +1442,51 @@ private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
                 }
             }
         }
+    }
+
+
+    // Deterministic request id to avoid spamming identical 'More time' requests across restarts.
+    // RFC4122 v5-style (SHA-1) name-based UUID in a fixed namespace.
+    private static Guid BuildDeterministicRequestId(ChildId childId, string localDate, AccessRequestType type, string target)
+    {
+        var name = $"{childId.Value:N}|{localDate}|{(int)type}|{target}";
+
+        // Fixed namespace UUID for Safe0ne child requests (do NOT change once shipped)
+        var ns = Guid.Parse("8f3f9e2b-3c7b-4d4b-9a3b-2e7f2c9d1a55");
+
+        var nsBytes = ns.ToByteArray();
+        SwapGuidByteOrder(nsBytes);
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+
+        var data = new byte[nsBytes.Length + nameBytes.Length];
+        Buffer.BlockCopy(nsBytes, 0, data, 0, nsBytes.Length);
+        Buffer.BlockCopy(nameBytes, 0, data, nsBytes.Length, nameBytes.Length);
+
+        byte[] hash;
+        using (var sha1 = SHA1.Create())
+        {
+            hash = sha1.ComputeHash(data);
+        }
+
+        var newGuid = new byte[16];
+        Array.Copy(hash, 0, newGuid, 0, 16);
+
+        // version 5
+        newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
+        // RFC4122 variant
+        newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
+
+        SwapGuidByteOrder(newGuid);
+        return new Guid(newGuid);
+    }
+
+    // .NET Guid uses mixed-endian fields; RFC4122 name-based UUID algorithm expects network byte order.
+    private static void SwapGuidByteOrder(byte[] guid)
+    {
+        void Swap(int a, int b) { (guid[a], guid[b]) = (guid[b], guid[a]); }
+        Swap(0, 3); Swap(1, 2);
+        Swap(4, 5);
+        Swap(6, 7);
     }
 
 }

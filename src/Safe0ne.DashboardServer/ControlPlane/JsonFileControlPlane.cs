@@ -502,7 +502,58 @@ public bool TryGetPendingPairing(ChildId childId, out PairingStartResponse resp)
                 }
             }
 
-            // K5: apps usage + blocked attempts rollups
+            // EPIC-SCREEN-TIME: If we detect a transition into budget depletion, create a best-effort
+            // MoreTime request in the control plane. This complements child-side request UX and ensures
+            // the parent inbox can surface an actionable item even if the kid UX is closed.
+            // NOTE: UpsertStatus runs under _gate; do not call methods that re-lock _gate.
+            try
+            {
+                var prevStatus = _statusByChildGuid.TryGetValue(key, out var priorStatus) ? priorStatus : null;
+                var prevDepleted = prevStatus?.ScreenTimeBudgetDepleted ?? false;
+                if (depleted && !prevDepleted && (limit ?? 0) > 0)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var windowStart = now.AddMinutes(-2);
+
+                    var exists = _requests
+                        .Where(r => r.ChildId.Value == childId.Value)
+                        .Where(r => r.Status == AccessRequestStatus.Pending)
+                        .Where(r => r.Type == AccessRequestType.MoreTime)
+                        .Where(r => string.Equals(r.Target, "screen_time", StringComparison.OrdinalIgnoreCase))
+                        .Where(r => r.CreatedAtUtc >= windowStart)
+                        .Any();
+
+                    if (!exists)
+                    {
+                        var created = new AccessRequest(
+                            RequestId: Guid.NewGuid(),
+                            ChildId: childId,
+                            Type: AccessRequestType.MoreTime,
+                            Target: "screen_time",
+                            Reason: "Daily screen time limit reached",
+                            CreatedAtUtc: now);
+
+                        _requests.Add(created);
+                        EnsureChildProfileUnsafe_NoLock(childId);
+
+                        try
+                        {
+                            var evt = JsonSerializer.Serialize(new[] { new { kind = "request_created", requestId = created.RequestId, type = created.Type.ToString(), target = created.Target, reason = created.Reason, occurredAtUtc = now.ToString("O") } }, JsonDefaults.Options);
+                            AppendLocalActivityJsonUnsafe_NoLock(childId.Value.ToString(), evt);
+                        }
+                        catch { }
+
+                        PersistUnsafe_NoLock();
+                    }
+                }
+            }
+            catch
+            {
+                // best-effort only
+            }
+
+// K5: apps usage + blocked attempts rollups
+
             var blockedTotal = 0;
             BlockedAttemptItem[]? topBlocked = null;
             AppUsageItem[]? topUsage = null;

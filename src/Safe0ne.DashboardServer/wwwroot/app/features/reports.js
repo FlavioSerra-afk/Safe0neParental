@@ -59,6 +59,7 @@
     const containerId = "alerts-inbox";
     const scheduleId = "reports-schedule";
     const activityId = "reports-activity";
+    const screenId = "reports-screen-time";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -91,6 +92,12 @@
       try{
         const actRoot = document.getElementById(activityId);
         if (actRoot) await renderActivityFeed(actRoot, children);
+      }catch{}
+
+      // EPIC-SCREEN-TIME: render a quick screen time digest panel from agent status rollups.
+      try{
+        const stRoot = document.getElementById(screenId);
+        if (stRoot) await renderScreenTimeDigest(stRoot, children);
       }catch{}
 
       // 16V: Alerts routing config (per child) — best-effort.
@@ -217,6 +224,11 @@
           <p class="muted">SSOT-backed events from kid devices (best-effort). Use this to spot screen-time, geofence, tamper, and request activity at a glance.</p>
           <div id="${activityId}">${escapeHtml("Loading…")}</div>
         </div>
+        <div class="card">
+          <h2>Screen time</h2>
+          <p class="muted">Budget status reported by the kid agent (privacy-first rollup). If a limit is reached, a More Time request is auto-created.</p>
+          <div id="${screenId}">${escapeHtml("Loading…")}</div>
+        </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
     `;
@@ -224,6 +236,66 @@
 
   NS.renderReports = renderReports;
   // Standard module contract
+
+  function fmtMins(m){
+    const n = Number(m);
+    if (!isFinite(n) || n < 0) return "—";
+    const h = Math.floor(n / 60);
+    const mm = Math.floor(n % 60);
+    return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+  }
+
+  async function renderScreenTimeDigest(root, children){
+    if (!root) return;
+    root.innerHTML = `<div class="skeleton">Loading screen time…</div>`;
+
+    const rows = [];
+    for (const c of (children || [])){
+      const id = c && c.id ? String(c.id) : "";
+      if (!id) continue;
+      const st = await Safe0neApi.getChildStatus(id);
+      if (st && st.ok){
+        rows.push({ child: c, status: st.data || {} });
+      }else{
+        rows.push({ child: c, status: { _error: (st && st.error) ? st.error : "Unknown" } });
+      }
+    }
+
+    const html = rows.map(r => {
+      const name = escapeHtml(r.child && r.child.name ? r.child.name : "Child");
+      const s = r.status || {};
+      if (s._error){
+        return `<tr><td>${name}</td><td colspan="4" class="muted">${escapeHtml(String(s._error))}</td></tr>`;
+      }
+
+      const limit = s.screenTimeLimitMinutes;
+      const used = s.screenTimeUsedMinutes;
+      const rem = s.screenTimeRemainingMinutes;
+      const depleted = !!s.screenTimeBudgetDepleted;
+      const badge = depleted ? `<span class="badge badge--danger">Depleted</span>` : `<span class="badge">OK</span>`;
+      const mode = escapeHtml(String(s.effectiveMode || ""));
+      return `<tr>
+        <td>${name}</td>
+        <td>${badge}</td>
+        <td>${fmtMins(used)}</td>
+        <td>${fmtMins(rem)}</td>
+        <td class="muted">${fmtMins(limit)} · ${mode}</td>
+      </tr>`;
+    }).join("");
+
+    root.innerHTML = `
+      <div style="overflow:auto">
+        <table class="table" style="min-width:640px">
+          <thead><tr>
+            <th>Child</th><th>Status</th><th>Used</th><th>Remaining</th><th>Limit · Mode</th>
+          </tr></thead>
+          <tbody>${html || `<tr><td colspan="5" class="muted">No data.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px">If a child hits their daily limit, the kid device shows a blocked screen and can request more time. Requests appear in the Requests inbox.</div>
+    `;
+  }
+
   NS.render = renderReports;
 
   // -------- Activity-backed alerts --------
