@@ -488,6 +488,7 @@ function renderPerAppLimitsCard(child, profile) {
           <span class="so-pill ${g.cls}"><span class="so-gender-symbol">${g.symbol}</span>&nbsp;${g.label}</span>
           <span class="so-pill">${escapeHtml(age)}</span>
           <span class="so-pill so-pill--muted" data-role="agent" data-childid="${escapeHtml(child.id)}">Protection: …</span>
+          <span class="so-pill so-pill--muted" data-role="time" data-childid="${escapeHtml(child.id)}">Time: —</span>
         </div>
       </div>
     </div>`;
@@ -1670,6 +1671,18 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
   }, 0);
 }
 
+// Local Mode: hydrate latest agent status (for Protection + Screen Time pills).
+if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
+  state.statusLoaded ??= {};
+  state.statusLoaded[id] = true;
+  setTimeout(() => {
+    Promise.resolve(refreshStatusFromApi(id))
+      .then(() => { try{ refreshAllStatusBadges(); }catch(_){ } })
+      .then(() => window.Safe0neRouter?.render?.())
+      .catch(() => {});
+  }, 0);
+}
+
     const g = genderMeta(child.gender);
     const tab = getChildTab(child.id);
 
@@ -1694,6 +1707,8 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
               <span class="so-pill ${g.cls}"><span class="so-gender-symbol">${g.symbol}</span>&nbsp;${g.label}</span>
               <span class="so-pill">${escapeHtml(child.ageGroup || "—")}</span>
+              <span class="so-pill so-pill--muted" data-role="profile-agent" data-childid="${escapeHtml(child.id)}">Protection: …</span>
+              <span class="so-pill so-pill--muted" data-role="profile-time" data-childid="${escapeHtml(child.id)}">Time: —</span>
             </div>
           </div>
         </div>
@@ -1818,6 +1833,7 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
     api: { available: false, children: null, inFlight: false, saveFailedByChildId: {}, devicesByChildId: {}, pairingByChildId: {}, statusByChildId: {}, diagnosticsInfoByChildId: {}, statusInFlight: {}, diagnosticsInFlight: {}, devicesInFlight: {}, pairingInFlight: {}, activityInFlight: {}, locationInFlight: {} },
     profilesLoaded: {},
     devicesLoaded: {},
+    statusLoaded: {},
     diagnosticsLoaded: {},
     activityLoaded: {},
     locationLoaded: {},
@@ -1854,6 +1870,48 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
     if (!el) return;
     el.textContent = text;
     el.className = `so-pill ${cls || 'so-pill--muted'}`;
+  }
+
+  function setPill(role, childId, text, cls){
+    const r = String(role || '').trim();
+    if (!r) return;
+    const id = String(childId || '');
+    const el = document.querySelector(`span[data-role="${cssEscape(r)}"][data-childid="${cssEscape(id)}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `so-pill ${cls || 'so-pill--muted'}`;
+  }
+
+  function formatScreenTimePill(st){
+    try{
+      if (!st) return null;
+      const limit = Number(st.screenTimeLimitMinutes);
+      const used = Number(st.screenTimeUsedMinutes);
+      const rem = Number(st.screenTimeRemainingMinutes);
+      const depleted = !!st.screenTimeBudgetDepleted;
+
+      if (!Number.isFinite(limit) || limit <= 0) return null;
+
+      // Prefer remaining when available.
+      if (Number.isFinite(rem)){
+        const m = Math.max(0, Math.round(rem));
+        if (depleted || m === 0) return { text: `Time: 0m left`, cls: 'so-pill--warning' };
+        if (m <= 5) return { text: `Time: ${m}m left`, cls: 'so-pill--warning' };
+        return { text: `Time: ${m}m left`, cls: 'so-pill--muted' };
+      }
+
+      // Fallback: used/limit.
+      if (Number.isFinite(used)){
+        const u = Math.max(0, Math.round(used));
+        const l = Math.max(1, Math.round(limit));
+        const over = u >= l;
+        return { text: `Time: ${Math.min(u,l)}/${l}m`, cls: over ? 'so-pill--warning' : 'so-pill--muted' };
+      }
+
+      return { text: `Time: ${Math.round(limit)}m/day`, cls: 'so-pill--muted' };
+    }catch{
+      return null;
+    }
   }
 
   function parseUtcMs(v){
@@ -1926,20 +1984,36 @@ if (state?.api?.available && isGuid(id) && !state.devicesLoaded[id]) {
 
       if (!st){
         setStatusPill(id, 'Protection: Never seen', 'so-pill--muted');
+        setPill('time', id, 'Time: —', 'so-pill--muted');
+        setPill('profile-agent', id, 'Protection: Never seen', 'so-pill--muted');
+        setPill('profile-time', id, 'Time: —', 'so-pill--muted');
         continue;
+      }
+
+      // Screen time rollup (K4): best-effort and safe when null.
+      const timePill = formatScreenTimePill(st);
+      if (timePill){
+        setPill('time', id, timePill.text, timePill.cls);
+        setPill('profile-time', id, timePill.text, timePill.cls);
+      } else {
+        setPill('time', id, 'Time: —', 'so-pill--muted');
+        setPill('profile-time', id, 'Time: —', 'so-pill--muted');
       }
 
       const last = parseUtcMs(st.lastHeartbeatUtc) || parseUtcMs(st.lastSeenUtc);
       if (!Number.isFinite(last)){
         setStatusPill(id, 'Protection: Unknown', 'so-pill--muted');
+        setPill('profile-agent', id, 'Protection: Unknown', 'so-pill--muted');
         continue;
       }
 
       const ageMs = Date.now() - last;
       if (ageMs <= OFFLINE_AFTER_MS){
         setStatusPill(id, 'Protection: Online', 'so-pill--success');
+        setPill('profile-agent', id, 'Protection: Online', 'so-pill--success');
       } else {
         setStatusPill(id, 'Protection: Offline', 'so-pill--warning');
+        setPill('profile-agent', id, 'Protection: Offline', 'so-pill--warning');
       }
     }
   }
