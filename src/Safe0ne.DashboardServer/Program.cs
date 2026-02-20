@@ -1356,6 +1356,18 @@ local.MapPut("/children/{childId:guid}/policy", async (Guid childId, HttpRequest
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
 
+    // EPIC-AUDIT: append-only local audit trail (privacy-first; payload redacted via hash).
+    try
+    {
+        var payload = incomingPolicy.ToJsonString(JsonDefaults.Options);
+        cp.AppendLocalAuditEntry(id,
+            actor: "parent",
+            action: "local_policy_put",
+            scope: "local_settings_profile.policy",
+            redactedPayload: $"{childId}:{nextVersion}:{payload}");
+    }
+    catch { /* best-effort */ }
+
     // Return envelope
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
@@ -1425,6 +1437,18 @@ local.MapPatch("/children/{childId:guid}/policy", async (Guid childId, HttpReque
     profileNode["effectiveAtUtc"] = DateTime.UtcNow.ToString("O");
 
     cp.UpsertLocalSettingsProfileJson(id, profileNode.ToJsonString(JsonDefaults.Options));
+
+    // EPIC-AUDIT: append-only local audit trail (privacy-first; payload redacted via hash).
+    try
+    {
+        var payload = patchObj.ToJsonString(JsonDefaults.Options);
+        cp.AppendLocalAuditEntry(id,
+            actor: "parent",
+            action: "local_policy_patch",
+            scope: "local_settings_profile.policy",
+            redactedPayload: $"{childId}:{nextVersion}:{payload}");
+    }
+    catch { /* best-effort */ }
 
     var (pv, eff, pol) = ReadPolicyEnvelopeFromProfileJson(childId.ToString(), profileNode.ToJsonString(JsonDefaults.Options));
     return Results.Json(new ApiResponse<object>(new { childId, policyVersion = pv, effectiveAtUtc = eff, policy = pol }, null), JsonDefaults.Options);
@@ -1541,6 +1565,14 @@ local.MapDelete("/devices/{deviceId:guid}", (Guid deviceId, JsonFileControlPlane
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
 
+    // EPIC-AUDIT: record unpair action (best-effort).
+    try
+    {
+        if (childId is { } c)
+            cp.AppendLocalAuditEntry(c, actor: "parent", action: "local_device_unpair", scope: "devices", redactedPayload: $"{deviceId}:{c.Value}");
+    }
+    catch { /* best-effort */ }
+
     return Results.Json(new ApiResponse<object>(new { ok = true, childId = childId.Value }, null), JsonDefaults.Options);
 });
 
@@ -1564,6 +1596,14 @@ local.MapPost("/devices/{deviceId:guid}/revoke", async (HttpRequest req, Guid de
     {
         return Results.Json(new ApiResponse<object?>(null, new ApiError("not_found", "Device not found")), JsonDefaults.Options, statusCode: StatusCodes.Status404NotFound);
     }
+
+    // EPIC-AUDIT: record revoke action (best-effort).
+    try
+    {
+        if (childId is { } c)
+            cp.AppendLocalAuditEntry(c, actor: revokedBy, action: "local_device_token_revoke", scope: "devices.token", redactedPayload: $"{deviceId}:{c.Value}:{reason}");
+    }
+    catch { /* best-effort */ }
 
 	// NOTE: avoid naming pattern variables 'cid' because it can conflict with later locals in this lambda scope.
 	return Results.Json(new ApiResponse<object>(new { ok = true, childId = (childId is { } childIdVal ? (Guid?)childIdVal.Value : null) }, null), JsonDefaults.Options);
@@ -1673,6 +1713,16 @@ local.MapGet("/children/{childId:guid}/activity/export", (Guid childId, JsonFile
         events
     };
     return Results.Json(new ApiResponse<object>(data, null), JsonDefaults.Options);
+});
+
+// EPIC-AUDIT: append-only audit log (Local Mode)
+local.MapGet("/children/{childId:guid}/audit", (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    var take = 200;
+    if (req.Query.TryGetValue("take", out var t) && int.TryParse(t.ToString(), out var n)) take = n;
+
+    var env = cp.GetLocalAuditLog(new ChildId(childId), take);
+    return Results.Json(new ApiResponse<AuditLogEnvelope>(env, null), JsonDefaults.Options);
 });
 
 

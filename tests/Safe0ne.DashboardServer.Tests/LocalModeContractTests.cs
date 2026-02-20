@@ -249,6 +249,32 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         }
     }
 
+    [Fact]
+    public async Task LocalAuditLog_ReturnsEntries_AfterLocalPolicyWrite()
+    {
+        using var client = _factory.CreateClient();
+
+        // Create child.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Audit Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // Write a local policy to ensure an audit entry is appended.
+        var put = await client.PutAsJsonAsync($"/api/local/children/{childId}/policy", new { mode = "allow" });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        var audit = await client.GetAsync($"/api/local/children/{childId}/audit?take=50");
+        Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
+
+        using var auditDoc = JsonDocument.Parse(await audit.Content.ReadAsStringAsync());
+        var entries = auditDoc.RootElement.GetProperty("data").GetProperty("entries");
+        Assert.Equal(JsonValueKind.Array, entries.ValueKind);
+        Assert.True(entries.GetArrayLength() >= 1);
+    }
+
 [Fact]
     public async Task LocalReports_ScheduleAndRunNow_AreAvailable_AndEmitDigestActivity()
     {
