@@ -14,7 +14,14 @@
   }
 
 
-  // 16V: Alerts routing config (per child). Best-effort: if profile can't be read, default to inbox enabled.
+  
+      // EPIC-WEB-FILTER-CIRCUMVENTION: show VPN/proxy/DNS/hosts-write-failure signals (best-effort).
+      try{
+        const cRoot = document.getElementById(circId);
+        if (cRoot) await renderCircumventionDigest(cRoot, children);
+      }catch{}
+
+// 16V: Alerts routing config (per child). Best-effort: if profile can't be read, default to inbox enabled.
   const _routingCache = { atMs: 0, map: {} };
   async function getInboxRoutingMap(children){
     const now = Date.now();
@@ -61,6 +68,7 @@
     const activityId = "reports-activity";
     const screenId = "reports-screen-time";
     const webBlocksId = "reports-web-blocks";
+    const circId = "reports-circumvention";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -241,6 +249,11 @@
           <p class="muted">When a website is blocked on a kid device, we emit a SSOT activity marker and auto-create an Unblock Site request (best-effort).</p>
           <div id="${webBlocksId}">${escapeHtml("Loading…")}</div>
         </div>
+        <div class="card">
+          <h2>Circumvention signals</h2>
+          <p class="muted">Best-effort integrity signals (VPN/proxy/public DNS/hosts-write failures). Edge-triggered activity is emitted on transitions.</p>
+          <div id="${circId}">${escapeHtml("Loading…")}</div>
+        </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
     `;
@@ -361,6 +374,73 @@
       <div class="muted" style="margin-top:8px">A blocked site triggers an Unblock Site request on the kid device (best-effort). Review in the Requests inbox.</div>
     `;
   }
+
+
+  async function renderCircumventionDigest(root, children){
+    if (!root) return;
+    root.innerHTML = `<div class="skeleton">Loading circumvention…</div>`;
+
+    const rows = [];
+    for (const c of (children || [])){
+      const id = c && c.id ? String(c.id) : "";
+      if (!id) continue;
+      let st = null;
+      try{
+        const res = await Safe0neApi.getChildStatus(id);
+        st = (res && res.ok) ? (res.data || null) : null;
+      }catch{}
+
+      const circ = st && st.circumvention ? st.circumvention : null;
+      const vpn = !!(circ && circ.vpnSuspected);
+      const proxy = !!(circ && circ.proxyEnabled);
+      const dns = !!(circ && circ.publicDnsDetected);
+      const hosts = !!(circ && circ.hostsWriteFailed);
+      const any = vpn || proxy || dns || hosts;
+
+      rows.push({
+        child: c.displayName || c.name || "Child",
+        vpn, proxy, dns, hosts, any,
+        lastSeenUtc: st ? (st.lastSeenUtc || st.lastSeenAtUtc || "") : ""
+      });
+    }
+
+    if (rows.length === 0){
+      root.textContent = "No children.";
+      return;
+    }
+
+    const head = `<div class="muted" style="margin-bottom:8px">Signals are best-effort and may produce false positives. We emit activity on transitions to reduce noise.</div>`;
+
+    const table = `
+      <table class="table">
+        <thead><tr>
+          <th>Child</th>
+          <th>VPN</th>
+          <th>Proxy</th>
+          <th>Public DNS</th>
+          <th>Hosts write</th>
+          <th>Last seen</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const pill = (b) => b ? `<span class="pill pill--danger">Yes</span>` : `<span class="pill">No</span>`;
+            const ls = r.lastSeenUtc ? fmtWhen(r.lastSeenUtc) : "—";
+            return `<tr>
+              <td style="font-weight:600">${escapeHtml(r.child)}</td>
+              <td>${pill(r.vpn)}</td>
+              <td>${pill(r.proxy)}</td>
+              <td>${pill(r.dns)}</td>
+              <td>${pill(r.hosts)}</td>
+              <td class="muted">${escapeHtml(ls)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+
+    root.innerHTML = head + table;
+  }
+
 
   NS.render = renderReports;
 

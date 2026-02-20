@@ -237,8 +237,11 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 ---
 
 ## Patch log
-- 26W08: FIX — HeartbeatWorker ChildId nullable compile guard (CS1503).
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
 - 26W08: EPIC-WEB-FILTER-ENFORCEMENT: web_blocked activity + UnblockSite request loop + kid blocked UX navigation + Reports digest.
+
+
+## Patch log (recent)
+- 26W08: EPIC-WEB-FILTER-CIRCUMVENTION: Reports circumvention digest + docs/canvas update
