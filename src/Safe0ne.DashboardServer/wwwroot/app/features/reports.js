@@ -58,6 +58,7 @@
   function renderReports(){
     const containerId = "alerts-inbox";
     const scheduleId = "reports-schedule";
+    const activityId = "reports-activity";
 
     // Populate the alerts list after initial mount; this matches existing router behavior.
     setTimeout(async () => {
@@ -83,6 +84,13 @@
       try{
         const schedRoot = document.getElementById(scheduleId);
         if (schedRoot) await renderReportsScheduleAuthoring(schedRoot, children);
+      }catch{}
+
+      // Best-effort: render recent Activity feed (SSOT-backed). Kept separate from alerts list so
+      // the inbox remains actionable while activity remains informative.
+      try{
+        const actRoot = document.getElementById(activityId);
+        if (actRoot) await renderActivityFeed(actRoot, children);
       }catch{}
 
       // 16V: Alerts routing config (per child) — best-effort.
@@ -204,6 +212,11 @@
           <p class="muted">Scheduling runs locally and writes digests into the SSOT activity stream.</p>
           <div id="${scheduleId}">${escapeHtml("Loading…")}</div>
         </div>
+        <div class="card">
+          <h2>Recent activity</h2>
+          <p class="muted">SSOT-backed events from kid devices (best-effort). Use this to spot screen-time, geofence, tamper, and request activity at a glance.</p>
+          <div id="${activityId}">${escapeHtml("Loading…")}</div>
+        </div>
         ${card("Audit log", "See who changed what and when. Helpful for trust and troubleshooting.", "Audit (later)")}
       </div>
     `;
@@ -214,6 +227,149 @@
   NS.render = renderReports;
 
   // -------- Activity-backed alerts --------
+
+  // -------- Activity feed (reports surface) --------
+
+  function activityBadge(kind){
+    const k = String(kind || "");
+    const cls = (k.includes("failed") || k.includes("tamper") || k.includes("circumvent")) ? "pill pill--danger"
+      : (k.includes("warning") || k.includes("depleted") || k.includes("blocked") || k.includes("geofence")) ? "pill pill--warning"
+      : "pill";
+    return `<span class="${cls}">${escapeHtml(k || "event")}</span>`;
+  }
+
+  async function renderActivityFeed(rootEl, children){
+    // A small, fast, cross-child feed. Avoid heavy pagination; the deeper exports live per child.
+    const takePerChild = 12;
+    const sinceMs = Date.now() - (24 * 60 * 60 * 1000);
+    const fromIso = new Date(sinceMs).toISOString();
+
+    // UI state (in-memory only; SSOT purity).
+    const filterId = "reports-activity-filter";
+    const showId = "reports-activity-show";
+    const exportId = "reports-activity-export";
+
+    rootEl.innerHTML = `
+      <div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px">
+          <span class="muted">Filter</span>
+          <input id="${filterId}" class="input" placeholder="screen_time, geofence, request…" style="min-width:220px">
+        </label>
+        <div class="row" style="gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn" id="${showId}">Refresh</button>
+          <button class="btn btn--ghost" id="${exportId}">Export…</button>
+        </div>
+      </div>
+      <div id="reports-activity-list" style="margin-top:10px">
+        <div class="skeleton">Loading activity…</div>
+      </div>
+    `;
+
+    async function loadAndRender(){
+      const listEl = rootEl.querySelector("#reports-activity-list");
+      if (!listEl) return;
+      listEl.innerHTML = `<div class="skeleton">Loading activity…</div>`;
+
+      const filt = (rootEl.querySelector(`#${filterId}`)?.value || "").trim().toLowerCase();
+
+      const items = [];
+      for (const c of (children || [])){
+        const cid = c && c.id ? String(c.id) : "";
+        if (!cid) continue;
+        const res = await Safe0neApi.getChildActivityLocal(cid, { from: fromIso, take: takePerChild });
+        if (!res || !res.ok) continue;
+        const arr = Array.isArray(res.data) ? res.data : (res.data && Array.isArray(res.data.items) ? res.data.items : []);
+        for (const it of (arr || [])){
+          items.push({ child: c, item: it });
+        }
+      }
+
+      // Normalize timestamps and sort desc.
+      const norm = items.map(x => {
+        const it = x.item || {};
+        const ts = it.atUtc || it.whenUtc || it.tsUtc || it.timestampUtc || it.createdUtc || it.timeUtc || it.at || it.when;
+        const ms = ts ? Date.parse(String(ts)) : 0;
+        return {
+          child: x.child,
+          kind: String(it.kind || it.type || it.event || it.name || ""),
+          title: String(it.title || ""),
+          detail: String(it.detail || it.message || it.reason || ""),
+          at: ts ? String(ts) : "",
+          atMs: isFinite(ms) ? ms : 0,
+          raw: it
+        };
+      }).sort((a,b)=> (b.atMs||0) - (a.atMs||0));
+
+      const filtered = filt
+        ? norm.filter(x => (x.kind + " " + x.title + " " + x.detail).toLowerCase().includes(filt))
+        : norm;
+
+      const top = filtered.slice(0, 40);
+      if (!top.length){
+        listEl.innerHTML = `<div class="notice">No activity in the last 24h.</div>`;
+        return;
+      }
+
+      listEl.innerHTML = top.map(x => {
+        const childName = x.child && (x.child.name || x.child.displayName) ? String(x.child.name || x.child.displayName) : "Child";
+        const when = x.at ? fmtWhen(x.at) : "";
+        const line = x.title || x.detail || "";
+        return `
+          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+            <div style="min-width:0">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                ${activityBadge(x.kind)}
+                <span style="font-weight:700">${escapeHtml(childName)}</span>
+                ${when ? `<span class="muted">${escapeHtml(when)}</span>` : ``}
+              </div>
+              <div style="opacity:.95;margin-top:2px;word-break:break-word">
+                ${escapeHtml(line || x.kind || "event")}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // Bind handlers.
+    const btn = rootEl.querySelector(`#${showId}`);
+    if (btn) btn.addEventListener("click", () => loadAndRender());
+    const inp = rootEl.querySelector(`#${filterId}`);
+    if (inp) inp.addEventListener("keydown", (e)=>{ if (e.key === "Enter") loadAndRender(); });
+    const exp = rootEl.querySelector(`#${exportId}`);
+    if (exp) exp.addEventListener("click", async () => {
+      // Simple picker: export the first child if only one, else ask via prompt.
+      let targetId = "";
+      if ((children || []).length === 1){
+        targetId = String(children[0].id || "");
+      } else {
+        const options = (children || []).map(c => `${c.name || c.displayName || c.id} (${c.id})`).join("\n");
+        const pick = prompt(`Export activity for which child? Paste an id:\n\n${options}`);
+        targetId = String(pick || "").trim();
+      }
+      if (!targetId) return;
+      try{
+        const res = await Safe0neApi.exportChildActivityLocal(targetId);
+        if (!res || !res.ok){
+          alert(`Export failed: ${res && res.error ? res.error : "unknown error"}`);
+          return;
+        }
+        // Best-effort download; keep zero-dependency.
+        const blob = new Blob([JSON.stringify(res.data || {}, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `activity_${targetId}_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(()=>{ try{ URL.revokeObjectURL(url);}catch{} try{ a.remove(); }catch{} }, 0);
+      }catch(err){
+        alert(`Export failed: ${err && err.message ? err.message : String(err || "error")}`);
+      }
+    });
+
+    await loadAndRender();
+  }
 
   function fmtWhen(isoUtc){
     try{

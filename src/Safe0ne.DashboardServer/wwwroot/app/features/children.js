@@ -1772,6 +1772,12 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
                   ? profile.policy.timeBudget.warnMinutesRemaining.join(",")
                   : "5,1")
             )}"/>
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <span style="color:#64748b;font-size:12px">Presets:</span>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="5,1" title="Classic">5,1</button>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="10,5,1" title="Gentle">10,5,1</button>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="15,10,5,1" title="More warnings">15,10,5,1</button>
+            </div>
             <div style="margin-top:6px;color:#64748b;font-size:12px;">Comma-separated minutes before limit (e.g., 10,5,1). Defaults to 5,1.</div>
           </div>
 
@@ -2448,6 +2454,15 @@ async function refreshPairingFromApi(childId) {
         return;
       }
       if (action === "noop") { ev.preventDefault(); return; }
+
+      if (action === "setWarnPreset") {
+        ev.preventDefault();
+        const v = btn.getAttribute("data-value") || "5,1";
+        const input = document.querySelector('input[data-field="warnAtMinutes"]');
+        if (input) input.value = v;
+        window.Safe0neUi?.toast?.("Updated", `Warnings preset set to ${v}.`);
+        return;
+      }
 
 
 if (action === "copyPairCode") {

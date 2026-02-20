@@ -70,7 +70,7 @@ Parent App is **Windows-first** (WPF + WebView2). Cross-platform flags below are
 | P-HEALTH-001 | Devices | Device health (heartbeat/last seen) | Win✅ | 🟡 | 26W08: basic status endpoint + child-card Protection badge; per-device diagnostics bundle + richer health view still pending. |
 | P-HEALTH-002 | Devices | Screen time rollup surfaced in child cards + profile header | Win✅ | ✅ | 26W08: uses ChildAgentStatus.ScreenTime* fields (remaining/used/limit) when available; safe placeholder otherwise. |
 | P-ANTITAMPER-001 | Security | Anti-tamper resilience (stubs) | Win✅ | 🟡 | 16W15–16W17: tamper/circumvention surfaced + alerts + policy gates; enforcement/self-repair still TBD. |
-| P-AUDIT-001 | Compliance | Append-only audit log for policy changes | Win✅ | 🔴 | Planned next: **PATCH_16W8** (proposal only). |
+| P-AUDIT-001 | Compliance | Append-only audit log for policy changes | Win✅ | 🟢 | 26W08: Implemented SSOT-backed audit stream + endpoint + UI viewer (Admin → Audit Log). |
 
 ## Cross-platform status (planning markers)
 
