@@ -243,12 +243,9 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 - 26W08: EPIC-WEB-FILTER-ENFORCEMENT: web_blocked activity + UnblockSite request loop + kid blocked UX navigation + Reports digest.
 
 
-- 26W08: EPIC-PAIRING: multi-device revoke isolation + per-device lastSeen contract test (LocalModeContractTests)
-
 ## Patch log (recent)
 - 26W08: EPIC-WEB-FILTER-CIRCUMVENTION: Reports circumvention digest + docs/canvas update
-
-- 26W08: EPIC-ACTIVITY: contract tests for append/query/export + docs registry reconciled to ✅.
+ - 26W08: EPIC-ENFORCE-SCREENTIME: deterministic MoreTime request on depletion + enforcement loop hardened.
 
 
 26W08: EPIC-JS-ERROR-CAPTURE: window.onerror/unhandledrejection ring buffer + DevTools export/clear.

@@ -529,6 +529,20 @@ if (auth?.DeviceToken is not null)
                 if (depleted && !lastDepleted)
                 {
                     lastDepleted = true;
+
+                    // EPIC-ENFORCE-SCREENTIME: when the daily budget is first depleted, auto-queue a "MoreTime" request
+                    // so the request loop is operational even if the child does not click the blocked screen CTA.
+                    // Idempotent by deterministic RequestId (one per child per local day).
+                    try
+                    {
+                        var rid = BuildDeterministicGuid($"more_time:{childId.Value}:{tick.LocalDate}");
+                        _requests.Enqueue(childId, AccessRequestType.MoreTime, target: "screen_time", reason: "Auto: time limit reached", requestId: rid);
+                    }
+                    catch
+                    {
+                        // best-effort
+                    }
+
                     activityOutbox ??= new ActivityOutbox(childId);
                     activityOutbox.Enqueue(new ActivityOutbox.LocalActivityEvent(
                         EventId: Guid.NewGuid(),
@@ -1344,6 +1358,49 @@ private static int ComputeExtraScreenTimeMinutes(Grant[]? activeGrants)
     }
     return sum;
 }
+
+    /// <summary>
+    /// Deterministic GUID helper (UUIDv5-style) used for idempotent request creation.
+    /// This prevents duplicate "MoreTime" requests across agent restarts.
+    /// </summary>
+    private static Guid BuildDeterministicGuid(string name)
+    {
+        // Fixed namespace GUID for Safe0ne agent-generated ids (do not change once shipped).
+        var ns = Guid.Parse("6b3f2d2f-9b6d-4d61-9ef4-8cf6e86d2a8a");
+
+        // Convert namespace GUID to network order bytes.
+        var nsBytes = ns.ToByteArray();
+        SwapGuidByteOrder(nsBytes);
+
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name ?? string.Empty);
+        var data = new byte[nsBytes.Length + nameBytes.Length];
+        Buffer.BlockCopy(nsBytes, 0, data, 0, nsBytes.Length);
+        Buffer.BlockCopy(nameBytes, 0, data, nsBytes.Length, nameBytes.Length);
+
+        using var sha1 = System.Security.Cryptography.SHA1.Create();
+        var hash = sha1.ComputeHash(data);
+
+        var newGuid = new byte[16];
+        Array.Copy(hash, 0, newGuid, 0, 16);
+
+        // Set version (5) and variant (RFC4122).
+        newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
+        newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
+
+        SwapGuidByteOrder(newGuid);
+        return new Guid(newGuid);
+    }
+
+    // .NET Guid byte layout uses mixed endianness for the first 3 components.
+    // UUID specifications expect network byte order.
+    private static void SwapGuidByteOrder(byte[] guid)
+    {
+        void Swap(int a, int b) { (guid[a], guid[b]) = (guid[b], guid[a]); }
+        Swap(0, 3);
+        Swap(1, 2);
+        Swap(4, 5);
+        Swap(6, 7);
+    }
 
 private static HashSet<string> BuildUnblockAppSet(Grant[]? activeGrants)
     {
