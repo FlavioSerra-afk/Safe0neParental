@@ -32,6 +32,36 @@ public static class PolicyCacheStore
         }
     }
 
+    /// <summary>
+    /// Load the cache with a lightweight integrity check.
+    /// Returns (entry, corrupt) where corrupt indicates the cache file existed but was unusable.
+    /// </summary>
+    public static (PolicyCacheEntry? Entry, bool Corrupt) LoadValidated(ChildId childId)
+    {
+        try
+        {
+            var path = CachePathFor(childId);
+            if (!File.Exists(path)) return (null, false);
+
+            var json = File.ReadAllText(path);
+            var entry = JsonSerializer.Deserialize<PolicyCacheEntry>(json, JsonDefaults.Options);
+
+            // Integrity check: require at least one usable policy surface.
+            var hasSurface = entry?.PolicySurface is { } ps && ps.ValueKind == JsonValueKind.Object;
+            var hasV1 = entry?.PolicyV1 is not null;
+            if (!hasSurface && !hasV1)
+            {
+                return (null, true);
+            }
+
+            return (entry, false);
+        }
+        catch
+        {
+            return (null, true);
+        }
+    }
+
     public static void Save(ChildId childId, PolicyCacheEntry entry)
     {
         try
@@ -39,6 +69,19 @@ public static class PolicyCacheStore
             var path = CachePathFor(childId);
             var json = JsonSerializer.Serialize(entry, JsonDefaults.Options);
             File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    public static void Delete(ChildId childId)
+    {
+        try
+        {
+            var path = CachePathFor(childId);
+            if (File.Exists(path)) File.Delete(path);
         }
         catch
         {

@@ -36,6 +36,7 @@ If support asks for a **diagnostics bundle**, you can request and download a sma
 Where:
 - **Children → select a child → Devices tab → Diagnostics bundle**
 - **Support & Safety** page (if available in navigation)
+- **Admin / Advanced → Diagnostics exports** (JSON snapshots)
 
 Flow:
 1. Click **Request new bundle**.
@@ -45,3 +46,13 @@ Flow:
 Privacy notes:
 - The bundle is **privacy-first** and excludes secrets (pairing tokens/auth state).
 - It is intended for troubleshooting pairing and policy sync issues.
+
+
+### Admin diagnostics exports
+
+In **Admin / Advanced → Diagnostics exports**, you can download:
+
+- **Local health bundle (JSON)**: service + control plane health and lightweight counts.
+- **SSOT snapshot (redacted JSON)**: children, devices, and status metadata (no pairing codes or raw tokens).
+
+These exports are intended for troubleshooting when the full UI is degraded.

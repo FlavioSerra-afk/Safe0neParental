@@ -96,19 +96,76 @@
     `;
   }
   function renderAdmin(){
+
+// Wire one-click downloads (no inline handlers)
+setTimeout(() => {
+  try{
+    const root = document.body;
+    if (!root || root.dataset.safe0neAdminDiagWired) return;
+    root.dataset.safe0neAdminDiagWired = "1";
+    root.addEventListener("click", async (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest("button[data-action]") : null;
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
+      if (action === "download-local-diag"){
+        ev.preventDefault();
+        await downloadJson("/api/local/diag/bundle", `safe0ne_diag_bundle_${nowStamp()}.json`);
+      }
+      if (action === "download-ssot-snapshot"){
+        ev.preventDefault();
+        await downloadJson("/api/local/admin/export/ssot-snapshot", `safe0ne_ssot_snapshot_${nowStamp()}.json`);
+      }
+    });
+  }catch{}
+}, 0);
     return `
       ${pageHeader("Admin / Advanced",
         "Advanced settings and diagnostics. Developer settings are hidden and clearly warned.",
-        "Export diagnostics (stub)"
+        null
       )}
       <div class="grid">
         ${card("Anti-tamper (planned)", "Tune alerts for protection disable/uninstall attempts. Best effort by platform.", "Best-effort notes")}
-        ${card("Diagnostics", "Export logs and a health snapshot for troubleshooting.", "Privacy-first")}
+        <div class="card">
+  <h2>Diagnostics exports</h2>
+  <p class="muted">Privacy-first downloads for troubleshooting and support. These exports do not include secrets.</p>
+  <div class="kv"><span>Local health bundle (JSON)</span><span><button class="btn" type="button" data-action="download-local-diag">Download</button></span></div>
+  <div class="kv"><span>SSOT snapshot (redacted JSON)</span><span><button class="btn" type="button" data-action="download-ssot-snapshot">Download</button></span></div>
+  <div class="hr"></div>
+  <p class="muted">Need a per-child device ZIP bundle? Use <b>Support</b> → Diagnostics exports.</p>
+</div>
         ${renderAuditUi()}
         ${card("Developer settings (hidden)", "In production, developer settings require a deliberate unlock and show a warning banner.", "Hidden entry")}
       </div>
     `;
   }
+
+
+function nowStamp(){
+  try{
+    const d = new Date();
+    const pad = (n)=> String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}_${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+  }catch{ return "unknown"; }
+}
+
+async function downloadJson(url, fileName){
+  try{
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok){
+      alert(`Download failed (${res.status})`);
+      return;
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName || "download.json";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(a.href); a.remove(); }catch{} }, 0);
+  }catch{
+    alert("Network error");
+  }
+}
 
   window.Safe0neAdmin = {
     // Standard module contract

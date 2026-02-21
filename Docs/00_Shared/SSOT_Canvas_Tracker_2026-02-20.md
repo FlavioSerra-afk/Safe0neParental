@@ -249,3 +249,5 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 
 
 26W08: EPIC-JS-ERROR-CAPTURE: window.onerror/unhandledrejection ring buffer + DevTools export/clear.
+
+- 26W09: EPIC-POLICY-SYNC-SELF-REPAIR: agent policy-sync health counters (heartbeat/policy fetch/auth rejected) surfaced in Devices tab; best-effort enroll-by-code self-repair; corrupt policy cache auto-delete.

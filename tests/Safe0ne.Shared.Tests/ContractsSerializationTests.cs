@@ -94,4 +94,35 @@ public sealed class ContractsSerializationTests
         Assert.Equal(req.Type, reqParsed.Type);
         Assert.Equal(req.Target, reqParsed.Target);
     }
+
+    [Fact]
+    public void ChildAgentHeartbeatRequest_RoundTrips_With_Tamper_PolicySyncHealth_Fields()
+    {
+        var id = ChildId.New();
+
+        var hb = new ChildAgentHeartbeatRequest(
+            DeviceName: "Kid-Device",
+            AgentVersion: "0.0.0-test",
+            SentAtUtc: DateTimeOffset.Parse("2026-02-20T12:00:00Z"),
+            Tamper: new TamperSignals(
+                NotRunningElevated: true,
+                EnforcementError: false,
+                LastError: null,
+                LastErrorAtUtc: null,
+                Notes: new[] { "note" },
+                ConsecutiveHeartbeatFailures: 3,
+                ConsecutivePolicyFetchFailures: 7,
+                AuthRejected: true,
+                AuthRejectedAtUtc: DateTimeOffset.Parse("2026-02-20T11:59:00Z")));
+
+        var json = JsonSerializer.Serialize(hb, JsonDefaults.Options);
+        var parsed = JsonSerializer.Deserialize<ChildAgentHeartbeatRequest>(json, JsonDefaults.Options);
+
+        Assert.NotNull(parsed);
+        Assert.NotNull(parsed!.Tamper);
+        Assert.Equal(3, parsed.Tamper!.ConsecutiveHeartbeatFailures);
+        Assert.Equal(7, parsed.Tamper.ConsecutivePolicyFetchFailures);
+        Assert.True(parsed.Tamper.AuthRejected);
+        Assert.Equal(DateTimeOffset.Parse("2026-02-20T11:59:00Z"), parsed.Tamper.AuthRejectedAtUtc);
+    }
 }

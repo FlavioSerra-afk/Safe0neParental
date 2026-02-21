@@ -546,6 +546,15 @@ function renderDevicesTab(child) {
   const apiDevices = useApi ? state.api.devicesByChildId[id] : null;
   const pairing = useApi ? state.api.pairingByChildId[id] : null;
 
+  // Policy sync health (26W09): best-effort load status so we can show auth/policy sync counters.
+  if (state?.api?.available && isGuid(id) && state.api.statusByChildId && state.api.statusByChildId[id] === undefined) {
+    setTimeout(() => {
+      Promise.resolve(refreshStatusFromApi(id))
+        .then((ok) => { if (ok) window.Safe0neRouter?.render?.(); })
+        .catch(() => {});
+    }, 0);
+  }
+
   // Diagnostics bundles are uploaded by the Kid device (K9). We show the latest bundle metadata here.
   if (state?.api?.available && isGuid(id) && !state.diagnosticsLoaded[id]) {
     state.diagnosticsLoaded[id] = true;
@@ -641,6 +650,33 @@ function renderDevicesTab(child) {
         <div style="margin-top:10px;display:grid;gap:10px;">${deepRows || `<div class="so-card-sub">No devices yet.</div>`}</div>
       </div>`;
 
+  const st = (useApi && state?.api?.statusByChildId) ? state.api.statusByChildId[id] : null;
+  const t = st && st.tamper ? st.tamper : null;
+  const policySyncPanel = (useApi ? (function(){
+    const lastHb = st && (st.lastHeartbeatUtc || st.lastSeenUtc) ? new Date(st.lastHeartbeatUtc || st.lastSeenUtc).toLocaleString() : "—";
+    const authRejected = !!(t && (t.authRejected || t.authRejectedAtUtc));
+    const hbFails = t && Number.isFinite(Number(t.consecutiveHeartbeatFailures)) ? Number(t.consecutiveHeartbeatFailures) : 0;
+    const polFails = t && Number.isFinite(Number(t.consecutivePolicyFetchFailures)) ? Number(t.consecutivePolicyFetchFailures) : 0;
+    const arAt = t && t.authRejectedAtUtc ? new Date(t.authRejectedAtUtc).toLocaleString() : null;
+
+    const severity = authRejected || hbFails >= 3 || polFails >= 6;
+
+    return `
+      <div class="card" style="margin-top:12px;${severity ? "background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.35);" : "background:#f8fafc;border:1px solid rgba(148,163,184,.25);"}">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+          <div style="font-weight:900;">Policy sync health</div>
+          <div class="so-card-sub">Agent-side counters (privacy-first)</div>
+        </div>
+        <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:8px;">
+          <div class="kv"><span>Last heartbeat</span><span>${escapeHtml(lastHb)}</span></div>
+          <div class="kv"><span>Heartbeat failures</span><span>${escapeHtml(String(hbFails))}</span></div>
+          <div class="kv"><span>Policy fetch failures</span><span>${escapeHtml(String(polFails))}</span></div>
+          <div class="kv"><span>Auth rejected</span><span>${escapeHtml(authRejected ? (arAt ? ("Yes (" + arAt + ")") : "Yes") : "No")}</span></div>
+        </div>
+        <div class="so-card-sub" style="margin-top:8px;">If <strong>Auth rejected</strong> is Yes, the token was revoked/expired. Re-pair the device.</div>
+      </div>`;
+  })() : "");
+
 
   // Pairing deep link is optional polish. It does not replace code-based pairing.
   const pairingCode = (pairing && pairing.pairingCode) ? String(pairing.pairingCode) : "";
@@ -729,6 +765,8 @@ function renderDevicesTab(child) {
       </div>
 
       ${deepPanel}
+
+      ${policySyncPanel}
     </div>`;
 }
 

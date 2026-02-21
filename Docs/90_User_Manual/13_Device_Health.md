@@ -16,6 +16,21 @@ Open **Children → select a child → Devices tab**.
 - If a device stays Offline, confirm the Kid agent is running.
 - If the device is paired but heartbeats are Unauthorized, the token may be **revoked** or **expired**. Re-pair to issue a fresh token (or unpair + pair again).
 
+## Policy sync health (counters)
+
+Safe0ne surfaces **privacy-first counters** to help diagnose sync issues:
+
+- **Heartbeat failures**: consecutive heartbeat attempts that did not return HTTP 200.
+- **Policy fetch failures**: consecutive ticks where the agent could not fetch a live policy surface (it may still enforce from the last cached policy).
+- **Auth rejected**: the server rejected the device token (typically revoked/expired).
+
+### Where to see it
+Open **Children → select a child → Devices tab → Policy sync health**.
+
+### What to do
+- If **Auth rejected** is Yes → re-pair the device (or unpair + pair).
+- If failures keep increasing → check the DashboardServer is running, then export diagnostics.
+
 
 ## Status reasons (Needs attention)
 - **Never seen**: paired but no authenticated heartbeat yet.

@@ -819,6 +819,116 @@ local.MapGet("/diag/bundle", (HttpRequest req, JsonFileControlPlane cp) =>
     }
 });
 
+
+
+// Admin export (read-only): redacted SSOT snapshot for troubleshooting.
+// Privacy-first: excludes active pairing codes and never returns raw device tokens.
+local.MapGet("/admin/export/ssot-snapshot", (JsonFileControlPlane cp) =>
+{
+    try
+    {
+        var atUtc = DateTimeOffset.UtcNow;
+        var children = cp.GetChildrenWithArchiveState(includeArchived: true).ToList();
+
+        var childRows = new List<object>();
+        foreach (var c in children)
+        {
+            var id = new ChildId(c.Id);
+            var devices = cp.GetDevices(id).Select(d => new
+            {
+                deviceId = d.DeviceId,
+                deviceName = d.DeviceName,
+                agentVersion = d.AgentVersion,
+                pairedAtUtc = d.PairedAtUtc,
+                lastSeenUtc = d.LastSeenUtc,
+                tokenIssuedAtUtc = d.TokenIssuedAtUtc,
+                tokenExpiresAtUtc = d.TokenExpiresAtUtc,
+                tokenRevokedAtUtc = d.TokenRevokedAtUtc,
+                tokenRevokedBy = d.TokenRevokedBy,
+                // NOTE: Keep this export compatible with current contracts.
+                // If you later add TokenRevokedReason/TokenHashSha256 to ChildDeviceSummary (additive-only),
+                // you can surface them here.
+                tokenRevokedReason = (string?)null,
+                tokenHashSha256 = (string?)null,
+            }).ToList();
+
+            // Best-effort: include status if present.
+            object? statusObj = null;
+            if (cp.TryGetStatus(id, out var st))
+            {
+                statusObj = new
+                {
+                    lastSeenUtc = st.LastSeenUtc,
+                    // Current contract surface: no explicit heartbeat/online flags.
+                    // Online/needsAttention are derived in UI from lastSeen + reason codes.
+                    lastHeartbeatAtUtc = (DateTimeOffset?)null,
+                    online = (bool?)null,
+                    needsAttention = (bool?)null,
+                    reason = st.ReasonCode,
+                    lastAppliedPolicyVersion = st.LastAppliedPolicyVersion,
+                    lastAppliedPolicyAtUtc = st.LastAppliedPolicyEffectiveAtUtc,
+                    lastApplyError = st.LastPolicyApplyError,
+                    tamperSignals = st.Tamper,
+                };
+            }
+
+            // Pairing session (redacted): do not export the pairing code.
+            object? pairingObj = null;
+            if (cp.TryGetPendingPairing(id, out var pairing))
+            {
+                pairingObj = new
+                {
+                    active = true,
+                    expiresAtUtc = pairing.ExpiresAtUtc,
+                    codeRedacted = true,
+                    // Current contract does not expose PairingLink; keep export stable.
+                    link = (string?)null,
+                };
+            }
+
+            childRows.Add(new
+            {
+                childId = id.Value,
+                displayName = c.DisplayName,
+                archived = c.Archived,
+                archivedAtUtc = c.ArchivedAtUtc,
+                devices,
+                status = statusObj,
+                pairing = pairingObj,
+            });
+        }
+
+        var (hcOk, hcErr) = cp.TryHealthCheck();
+        var cpInfoObj = (object)cp.GetInfo();
+        static object? ReadProp(object o, string name) => o.GetType().GetProperty(name)?.GetValue(o);
+        static bool ReadBool(object? v) => v is bool b ? b : (v is string s && bool.TryParse(s, out var p) ? p : false);
+        static int ReadInt(object? v) => v is int i ? i : (v is string s && int.TryParse(s, out var p) ? p : 0);
+        static string? ReadStr(object? v) => v as string;
+
+        var snapshot = new
+        {
+            ok = true,
+            exportedAtUtc = atUtc,
+            health = new { ok = hcOk, error = hcErr },
+            controlPlane = new
+            {
+                ok = ReadBool(ReadProp(cpInfoObj, "Ok")),
+                backend = ReadStr(ReadProp(cpInfoObj, "Backend")) ?? "unknown",
+                schemaVersion = ReadInt(ReadProp(cpInfoObj, "SchemaVersion")),
+                storagePath = ReadStr(ReadProp(cpInfoObj, "StoragePath"))
+            },
+            children = childRows,
+        };
+
+        return Results.Json(snapshot, JsonDefaults.Options);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { ok = false, error = ex.Message, exportedAtUtc = DateTimeOffset.UtcNow }, JsonDefaults.Options,
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+});
+
 // Legacy alias for tool compatibility (read-only).
 app.MapGet($"/api/{ApiVersions.V1}/diag/bundle", (HttpRequest req, JsonFileControlPlane cp) =>
 {
