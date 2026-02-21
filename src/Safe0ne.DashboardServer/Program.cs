@@ -92,17 +92,13 @@ app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/effective", (Guid c
 app.MapGet($"/api/{ApiVersions.V1}/children/{{childId:guid}}/status", (Guid childId, JsonFileControlPlane cp) =>
 {
     var id = new ChildId(childId);
-
-    // UX NOTE: A child can exist before any agent has checked in. Returning HTTP 404 here causes
-    // noisy console spam in embedded WebView clients ("Failed to load resource"), even though this
-    // is an expected state ("Never seen"). So we return HTTP 200 with an ApiError payload.
     if (!cp.TryGetStatus(id, out var status))
     {
         return Results.Json(
-            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_seen", "Child has not checked in yet")),
-            JsonDefaults.Options);
+            new ApiResponse<ChildAgentStatus>(null, new ApiError("not_found", "Child status not found")),
+            JsonDefaults.Options,
+            statusCode: StatusCodes.Status404NotFound);
     }
-
     return Results.Json(new ApiResponse<ChildAgentStatus>(status, null), JsonDefaults.Options);
 });
 
@@ -1668,7 +1664,11 @@ local.MapGet("/children/{childId:guid}/activity", (HttpRequest req, Guid childId
     DateTimeOffset? to = null;
     int take = 200;
     if (req.Query.TryGetValue("from", out var fromV) && DateTimeOffset.TryParse(fromV.ToString(), out var f)) from = f;
+    // LEGACY-COMPAT: accept fromUtc alias for older callers/tests | RemoveAfter: EPIC-ACTIVITY-TO-GREEN | Tracking: Docs/00_Shared/Legacy-Code-Registry.md#activity-fromUtc
+    if (from is null && req.Query.TryGetValue("fromUtc", out var fromVUtc) && DateTimeOffset.TryParse(fromVUtc.ToString(), out var fUtc)) from = fUtc;
     if (req.Query.TryGetValue("to", out var toV) && DateTimeOffset.TryParse(toV.ToString(), out var t)) to = t;
+    // LEGACY-COMPAT: accept toUtc alias for older callers/tests | RemoveAfter: EPIC-ACTIVITY-TO-GREEN | Tracking: Docs/00_Shared/Legacy-Code-Registry.md#activity-toUtc
+    if (to is null && req.Query.TryGetValue("toUtc", out var toVUtc) && DateTimeOffset.TryParse(toVUtc.ToString(), out var tUtc)) to = tUtc;
     if (req.Query.TryGetValue("take", out var takeV) && int.TryParse(takeV.ToString(), out var tk)) take = tk;
 
     var json = cp.GetLocalActivityJson(new ChildId(childId), from, to, take);

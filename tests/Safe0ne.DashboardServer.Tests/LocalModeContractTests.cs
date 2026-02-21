@@ -294,9 +294,8 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
             Assert.Equal("test_c", data[0].GetProperty("kind").GetString());
         }
 
-        // Filter from t1 (should include b and c).
-        // NOTE: Local activity endpoint uses query keys `from`/`to` (not `fromUtc`/`toUtc`).
-        var get2 = await client.GetAsync($"/api/local/children/{childId}/activity?from={Uri.EscapeDataString(t1.ToString("O"))}&take=10");
+        // Filter from t1 (should include b and c)
+        var get2 = await client.GetAsync($"/api/local/children/{childId}/activity?fromUtc={Uri.EscapeDataString(t1.ToString("O"))}&take=10");
         Assert.Equal(HttpStatusCode.OK, get2.StatusCode);
         using (var doc = JsonDocument.Parse(await get2.Content.ReadAsStringAsync()))
         {
@@ -507,4 +506,135 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         // Cleanup env var to avoid bleeding into other tests.
         Environment.SetEnvironmentVariable("SAFE0NE_POLICY_WATCHDOG_SECONDS", null);
     }
+
+
+[Fact]
+public async Task LocalPairing_MultiDevice_RevokeIsolation_And_LastSeen_AreStable()
+{
+    using var client = _factory.CreateClient();
+
+    // Create a child in local mode.
+    var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Multi Device Child" });
+    Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+    using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+    var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+    Assert.False(string.IsNullOrWhiteSpace(childId));
+
+    // Pair device A.
+    var startA = await client.PostAsync($"/api/v1/children/{childId}/pair/start", content: null);
+    Assert.Equal(HttpStatusCode.OK, startA.StatusCode);
+    using var startADoc = JsonDocument.Parse(await startA.Content.ReadAsStringAsync());
+    var codeA = startADoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
+    Assert.False(string.IsNullOrWhiteSpace(codeA));
+
+    var completeA = await client.PostAsJsonAsync($"/api/v1/children/{childId}/pair/complete", new
+    {
+        pairingCode = codeA,
+        deviceName = "DeviceA",
+        agentVersion = "test"
+    });
+    Assert.Equal(HttpStatusCode.OK, completeA.StatusCode);
+    using var completeADoc = JsonDocument.Parse(await completeA.Content.ReadAsStringAsync());
+    var deviceIdA = completeADoc.RootElement.GetProperty("data").GetProperty("deviceId").GetString();
+    var tokenA = completeADoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
+    Assert.False(string.IsNullOrWhiteSpace(deviceIdA));
+    Assert.False(string.IsNullOrWhiteSpace(tokenA));
+
+    // Pair device B.
+    var startB = await client.PostAsync($"/api/v1/children/{childId}/pair/start", content: null);
+    Assert.Equal(HttpStatusCode.OK, startB.StatusCode);
+    using var startBDoc = JsonDocument.Parse(await startB.Content.ReadAsStringAsync());
+    var codeB = startBDoc.RootElement.GetProperty("data").GetProperty("pairingCode").GetString();
+    Assert.False(string.IsNullOrWhiteSpace(codeB));
+
+    var completeB = await client.PostAsJsonAsync($"/api/v1/children/{childId}/pair/complete", new
+    {
+        pairingCode = codeB,
+        deviceName = "DeviceB",
+        agentVersion = "test"
+    });
+    Assert.Equal(HttpStatusCode.OK, completeB.StatusCode);
+    using var completeBDoc = JsonDocument.Parse(await completeB.Content.ReadAsStringAsync());
+    var deviceIdB = completeBDoc.RootElement.GetProperty("data").GetProperty("deviceId").GetString();
+    var tokenB = completeBDoc.RootElement.GetProperty("data").GetProperty("deviceToken").GetString();
+    Assert.False(string.IsNullOrWhiteSpace(deviceIdB));
+    Assert.False(string.IsNullOrWhiteSpace(tokenB));
+
+    // Heartbeat from both devices (auth required once paired).
+    using var hbAReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat");
+    hbAReq.Headers.Add("X-Safe0ne-Device-Token", tokenA);
+    hbAReq.Content = JsonContent.Create(new
+    {
+        deviceName = "DeviceA",
+        agentVersion = "test",
+        sentAtUtc = DateTimeOffset.UtcNow
+    });
+    var hbA = await client.SendAsync(hbAReq);
+    Assert.Equal(HttpStatusCode.OK, hbA.StatusCode);
+
+    using var hbBReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat");
+    hbBReq.Headers.Add("X-Safe0ne-Device-Token", tokenB);
+    hbBReq.Content = JsonContent.Create(new
+    {
+        deviceName = "DeviceB",
+        agentVersion = "test",
+        sentAtUtc = DateTimeOffset.UtcNow
+    });
+    var hbB = await client.SendAsync(hbBReq);
+    Assert.Equal(HttpStatusCode.OK, hbB.StatusCode);
+
+    // Device list should contain both devices and lastSeen populated per-device.
+    var devicesBefore = await client.GetAsync($"/api/local/children/{childId}/devices");
+    Assert.Equal(HttpStatusCode.OK, devicesBefore.StatusCode);
+    using var devicesBeforeDoc = JsonDocument.Parse(await devicesBefore.Content.ReadAsStringAsync());
+    var arrBefore = devicesBeforeDoc.RootElement.GetProperty("data").EnumerateArray().ToList();
+    Assert.True(arrBefore.Count >= 2);
+
+    var aBefore = arrBefore.Single(x => x.GetProperty("deviceId").GetString() == deviceIdA);
+    var bBefore = arrBefore.Single(x => x.GetProperty("deviceId").GetString() == deviceIdB);
+    Assert.True(aBefore.TryGetProperty("lastSeenUtc", out var aSeen) && aSeen.ValueKind != JsonValueKind.Null);
+    Assert.True(bBefore.TryGetProperty("lastSeenUtc", out var bSeen) && bSeen.ValueKind != JsonValueKind.Null);
+
+    // Revoke device A token only.
+    var revokeA = await client.PostAsJsonAsync($"/api/local/devices/{deviceIdA}/revoke", new { revokedBy = "test", reason = "unit" });
+    Assert.Equal(HttpStatusCode.OK, revokeA.StatusCode);
+
+    // Heartbeat with revoked token should be unauthorized.
+    using var hbA2Req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat");
+    hbA2Req.Headers.Add("X-Safe0ne-Device-Token", tokenA);
+    hbA2Req.Content = JsonContent.Create(new
+    {
+        deviceName = "DeviceA",
+        agentVersion = "test",
+        sentAtUtc = DateTimeOffset.UtcNow
+    });
+    var hbA2 = await client.SendAsync(hbA2Req);
+    Assert.Equal(HttpStatusCode.Unauthorized, hbA2.StatusCode);
+
+    // Device B must still be authorized.
+    using var hbB2Req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/children/{childId}/heartbeat");
+    hbB2Req.Headers.Add("X-Safe0ne-Device-Token", tokenB);
+    hbB2Req.Content = JsonContent.Create(new
+    {
+        deviceName = "DeviceB",
+        agentVersion = "test",
+        sentAtUtc = DateTimeOffset.UtcNow
+    });
+    var hbB2 = await client.SendAsync(hbB2Req);
+    Assert.Equal(HttpStatusCode.OK, hbB2.StatusCode);
+
+    // Device record for A remains but is revoked.
+    var devicesAfter = await client.GetAsync($"/api/local/children/{childId}/devices");
+    Assert.Equal(HttpStatusCode.OK, devicesAfter.StatusCode);
+    using var devicesAfterDoc = JsonDocument.Parse(await devicesAfter.Content.ReadAsStringAsync());
+    var arrAfter = devicesAfterDoc.RootElement.GetProperty("data").EnumerateArray().ToList();
+
+    var aAfter = arrAfter.Single(x => x.GetProperty("deviceId").GetString() == deviceIdA);
+    Assert.True(aAfter.TryGetProperty("tokenRevoked", out var revoked) && revoked.ValueKind == JsonValueKind.True);
+
+    // Device B still present and not revoked.
+    var bAfter = arrAfter.Single(x => x.GetProperty("deviceId").GetString() == deviceIdB);
+    Assert.True(bAfter.TryGetProperty("tokenRevoked", out var bRev) && bRev.ValueKind == JsonValueKind.False);
+}
 }

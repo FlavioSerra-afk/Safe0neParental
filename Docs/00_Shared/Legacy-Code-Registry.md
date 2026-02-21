@@ -24,3 +24,8 @@ In code, use:
 ```
 
 and prefer grouping shims in `*Compat*` / `Legacy*` files.
+
+
+## Activity query aliases
+- `Program.cs` Local Mode `/children/{childId}/activity` accepts `fromUtc`/`toUtc` as aliases of `from`/`to`.
+  - LEGACY-COMPAT: RemoveAfter: EPIC-ACTIVITY-TO-GREEN | Tracking: activity-fromUtc / activity-toUtc
