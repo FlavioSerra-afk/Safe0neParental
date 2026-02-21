@@ -1,6 +1,6 @@
 # Activity Feed (Local Mode)
 
-Updated: 2026-02-18
+Updated: 2026-02-21
 
 The Activity Feed shows **recent events** emitted by the child device and the local server (DashboardServer).  
 It is intended for **debugging, reports, and audit-style visibility**.
