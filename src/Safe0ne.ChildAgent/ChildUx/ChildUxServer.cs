@@ -359,51 +359,38 @@ public sealed class ChildUxServer
             "web" => "Website blocked",
             "app" => "App blocked",
             "time" => "Time limit reached",
+            "schedule" => "Not allowed right now",
             _ => "Blocked"
         };
 
-        var st = snap.ScreenTime;
-        var resetLocal = DateTimeOffset.Now.Date.AddDays(1);
-
         var sb = new StringBuilder();
-        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/><title>Safe0ne Blocked</title>");
-        sb.Append("<style>html,body{height:100%;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:linear-gradient(135deg,#0b1220,#0f172a);color:#0b1220;} .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:22px;} .card{width:min(940px,100%);background:#fff;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.35);padding:20px 22px;} .muted{color:#64748b;} .kicker{display:inline-flex;align-items:center;gap:8px;font-weight:800;color:#0f172a;} .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e3a8a;font-weight:800;font-size:12px;} .pill-danger{background:#fee2e2;color:#991b1b;} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px;} .box{border:1px solid #e2e8f0;border-radius:14px;padding:12px;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .btn{display:inline-block;padding:10px 14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;color:#0f172a;text-decoration:none;font-weight:800;} .btn-primary{background:#0b57d0;border-color:#0b57d0;color:#fff;} .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;align-items:center;}</style>");
-        sb.Append("</head><body><div class='wrap'><div class='card'>");
-        sb.Append($"<div class='kicker'><span class='pill pill-danger'>Blocked</span><span>{WebUtility.HtmlEncode(title)}</span></div>");
-        sb.Append($"<h1 style='margin:10px 0 6px 0;font-size:28px'>{WebUtility.HtmlEncode(title)}</h1>");
+        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Safe0ne Blocked</title>");
+        sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;background:#fafafa;} .card{max-width:900px;border:1px solid #ddd;border-radius:14px;padding:18px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);} .muted{color:#666;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;} .btn{display:inline-block;padding:10px 14px;border:1px solid #ddd;border-radius:12px;background:#fff;color:#111;text-decoration:none;} .btn-primary{border-color:#0b57d0;color:#0b57d0;} .pill{display:inline-block;padding:2px 10px;border:1px solid #eee;border-radius:999px;background:#f7f7f7;color:#444;font-size:12px;margin-left:6px;}</style>");
+        sb.Append("</head><body><div class='card'>");
+        sb.Append($"<h1 style='margin:0 0 8px 0'>{WebUtility.HtmlEncode(title)}</h1>");
 
         if (!string.IsNullOrWhiteSpace(target))
             sb.Append($"<div><b>Target:</b> {WebUtility.HtmlEncode(target)}</div>");
         if (!string.IsNullOrWhiteSpace(reason))
             sb.Append($"<div class='muted'><b>Reason:</b> {WebUtility.HtmlEncode(reason)}</div>");
 
-        sb.Append($"<div class='muted' style='margin-top:10px'><b>Mode:</b> {WebUtility.HtmlEncode(mode)} · <b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}</div>");
-
-        if (string.Equals(kind, "time", StringComparison.OrdinalIgnoreCase) && st.LimitEnabled)
-        {
-            sb.Append("<div class='grid'>");
-            sb.Append($"<div class='box'><div class='muted'>Used today</div><div style='font-weight:900;font-size:22px'>{WebUtility.HtmlEncode(FormatTime(st.UsedToday))}</div></div>");
-            sb.Append($"<div class='box'><div class='muted'>Remaining</div><div style='font-weight:900;font-size:22px'>{WebUtility.HtmlEncode(FormatTime(st.RemainingToday))}</div></div>");
-            sb.Append($"<div class='box'><div class='muted'>Resets</div><div style='font-weight:900;font-size:22px'>{WebUtility.HtmlEncode(resetLocal.ToString("t"))}</div><div class='muted'>at midnight</div></div>");
-            sb.Append("</div>");
-        }
-
-        sb.Append("<div class='muted' style='margin-top:12px'>If this seems wrong, ask a parent to review your rules. You can also send a request from this screen.</div>");
+        sb.Append($"<div style='margin-top:12px'><b>Mode:</b> {WebUtility.HtmlEncode(mode)} · <b>Active schedule:</b> {WebUtility.HtmlEncode(activeSchedule)}" + (string.Equals(kind, "schedule", StringComparison.OrdinalIgnoreCase) ? " <span class='pill'>Schedule</span>" : string.Empty) + "</div>");
+        sb.Append("<div class='muted' style='margin-top:8px'>If this seems wrong, ask a parent to review your rules. You can also send a request from this screen.</div>");
 
         // Request actions (minimal v1)
         if (string.Equals(kind, "time", StringComparison.OrdinalIgnoreCase))
         {
-            sb.Append("<div class='row'>");
-            sb.Append("<a class='btn btn-primary' href='/request?type=more_time&amp;minutes=15&amp;target=screen_time'>Request +15 minutes</a>");
-            sb.Append("<a class='btn' href='/today'>View Today</a>");
-            sb.Append("</div>");
+            sb.Append("<div class='row'><a class='btn btn-primary' href='/request?type=more_time&amp;minutes=15&amp;target=screen_time&amp;reason=screen_time_blocked'>Request +15 minutes</a>");
+            sb.Append("<a class='btn' href='/today'>View Today</a></div>");
+        }
+        else if (string.Equals(kind, "schedule", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.Append("<div class='row'><a class='btn btn-primary' href='/request?type=more_time&amp;minutes=15&amp;target=schedule&amp;reason=schedule_blocked'>Request access</a>");
+            sb.Append("<a class='btn' href='/today'>View Today</a></div>");
         }
         else if (string.Equals(kind, "app", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(target))
         {
-            sb.Append("<div class='row'>");
-            sb.Append($"<a class='btn btn-primary' href='/request?type=unblock_app&amp;target={WebUtility.UrlEncode(target)}&amp;reason=blocked'>Request unblock app</a>");
-            sb.Append("<a class='btn' href='/today'>View Today</a>");
-            sb.Append("</div>");
+            sb.Append($"<div style='margin-top:12px'><a href='/request?type=unblock_app&amp;target={WebUtility.UrlEncode(target)}&amp;reason=blocked'>Request unblock app</a></div>");
         }
         else if (string.Equals(kind, "app", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(target))
         {
@@ -416,10 +403,7 @@ public sealed class ChildUxServer
         }
         else if (string.Equals(kind, "web", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(target))
         {
-            sb.Append("<div class='row'>");
-            sb.Append($"<a class='btn btn-primary' href='/request?type=unblock_site&amp;target={WebUtility.UrlEncode(target)}&amp;reason=blocked'>Request unblock site</a>");
-            sb.Append("<a class='btn' href='/today'>View Today</a>");
-            sb.Append("</div>");
+            sb.Append($"<div style='margin-top:12px'><a href='/request?type=unblock_site&amp;target={WebUtility.UrlEncode(target)}&amp;reason=blocked'>Request unblock site</a></div>");
         }
         else if (string.Equals(kind, "web", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(target))
         {
@@ -433,8 +417,8 @@ public sealed class ChildUxServer
 
         sb.Append(RenderRecentRequestsHtml(eff?.ActiveGrants));
 
-        sb.Append($"<div class='muted' style='margin-top:14px'><a href='/emergency'>Emergency help</a></div>");
-        sb.Append("</div></div></body></html>");
+        sb.Append($"<div style='margin-top:12px'><a href='{WebUtility.HtmlEncode(BaseUrl)}today'>View Today</a> · <a href='/emergency'>Emergency help</a></div>");
+        sb.Append("</div></body></html>");
         return sb.ToString();
     }
 
@@ -458,9 +442,9 @@ public sealed class ChildUxServer
         };
 
         var sb = new StringBuilder();
-        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/><title>Safe0ne Warning</title>");
-        sb.Append("<style>html,body{height:100%;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:linear-gradient(135deg,#0b1220,#0f172a);color:#0b1220;} .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:22px;} .card{width:min(900px,100%);background:#fff;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.35);padding:20px 22px;} .muted{color:#64748b;} .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#fffbeb;color:#92400e;font-weight:900;font-size:12px;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .btn{display:inline-block;padding:10px 14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;color:#0f172a;text-decoration:none;font-weight:900;} .btn-primary{background:#0b57d0;border-color:#0b57d0;color:#fff;} .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;align-items:center;}</style>");
-        sb.Append("</head><body><div class='wrap'><div class='card'>");
+        sb.Append("<!doctype html><html><head><meta charset='utf-8'/><title>Safe0ne Warning</title>");
+        sb.Append("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:24px;} .card{max-width:860px;border:1px solid #ddd;border-radius:12px;padding:16px;} .muted{color:#666;} a{color:#0b57d0;text-decoration:none;} a:hover{text-decoration:underline;} .btn{display:inline-block;padding:10px 14px;border:1px solid #ddd;border-radius:10px;background:#fff;color:#111;text-decoration:none;}</style>");
+        sb.Append("</head><body><div class='card'>");
         sb.Append($"<h1 style='margin:0 0 8px 0'>{WebUtility.HtmlEncode(title)}</h1>");
         sb.Append("<div class='muted'>Your screen time is almost finished. You can ask a parent for more time.</div>");
 
@@ -469,11 +453,11 @@ public sealed class ChildUxServer
             sb.Append($"<div style='margin-top:12px'><b>Today</b> · Used: {WebUtility.HtmlEncode(FormatTime(st.Used))} · Remaining: {WebUtility.HtmlEncode(FormatTime(st.Remaining))}</div>");
         }
 
-        sb.Append("<div class='row'>");
-        sb.Append("<a class='btn btn-primary' href='/request?type=more_time&amp;minutes=15&amp;target=screen_time&amp;reason=screen_time_warning'>Request +15 minutes</a>");
-        sb.Append("<a class='btn' href='/today'>Back to Today</a>");
+        sb.Append("<div style='margin-top:14px'>");
+        sb.Append("<a class='btn' href='/request?type=more_time&amp;minutes=15&amp;target=screen_time&amp;reason=screen_time_warning'>Request +15 minutes</a>");
         sb.Append("</div>");
-        sb.Append("</div></div></body></html>");
+        sb.Append("<div style='margin-top:12px'><a href='/today'>Back to Today</a></div>");
+        sb.Append("</div></body></html>");
         return sb.ToString();
     }
 
