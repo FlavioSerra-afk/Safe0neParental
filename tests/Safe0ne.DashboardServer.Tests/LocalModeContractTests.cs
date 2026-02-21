@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Linq;
+using System.Collections.Generic;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
@@ -247,6 +249,113 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
             Assert.False(string.IsNullOrWhiteSpace(last1));
             Assert.True(string.IsNullOrWhiteSpace(last2));
         }
+    }
+
+    [Fact]
+    public async Task LocalActivity_Append_Query_Filter_And_Export_AreStable()
+    {
+        using var client = _factory.CreateClient();
+
+        // Create child.
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Activity Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        var t0 = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var t1 = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var t2 = DateTimeOffset.UtcNow;
+
+        // Append a small batch.
+        var batch = new object[]
+        {
+            new { eventId = Guid.NewGuid(), occurredAtUtc = t0, kind = "test_a", details = "a" },
+            new { eventId = Guid.NewGuid(), occurredAtUtc = t1, kind = "test_b", details = "b" },
+            new { eventId = Guid.NewGuid(), occurredAtUtc = t2, kind = "test_c", details = "c" },
+        };
+
+        var post = await client.PostAsJsonAsync($"/api/local/children/{childId}/activity", batch);
+        Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+
+        // Query newest-first.
+        var get = await client.GetAsync($"/api/local/children/{childId}/activity?take=10");
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+
+        using (var doc = JsonDocument.Parse(await get.Content.ReadAsStringAsync()))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("ok", out var okEl) ? okEl.GetBoolean() : true);
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal(JsonValueKind.Array, data.ValueKind);
+            Assert.True(data.GetArrayLength() >= 3);
+
+            // Newest first should be test_c
+            Assert.Equal("test_c", data[0].GetProperty("kind").GetString());
+        }
+
+        // Filter from t1 (should include b and c).
+        // NOTE: Local activity endpoint uses query keys `from`/`to` (not `fromUtc`/`toUtc`).
+        var get2 = await client.GetAsync($"/api/local/children/{childId}/activity?from={Uri.EscapeDataString(t1.ToString("O"))}&take=10");
+        Assert.Equal(HttpStatusCode.OK, get2.StatusCode);
+        using (var doc = JsonDocument.Parse(await get2.Content.ReadAsStringAsync()))
+        {
+            var data = doc.RootElement.GetProperty("data");
+            var kinds = data.EnumerateArray().Select(x => x.GetProperty("kind").GetString()).ToArray();
+            Assert.Contains("test_b", kinds);
+            Assert.Contains("test_c", kinds);
+            Assert.DoesNotContain("test_a", kinds);
+        }
+
+        // Export envelope should include events.
+        var export = await client.GetAsync($"/api/local/children/{childId}/activity/export");
+        Assert.Equal(HttpStatusCode.OK, export.StatusCode);
+        var exportJson = await export.Content.ReadAsStringAsync();
+        Assert.Contains("events", exportJson);
+        Assert.Contains("test_a", exportJson);
+        Assert.Contains("test_b", exportJson);
+        Assert.Contains("test_c", exportJson);
+    }
+
+    [Fact]
+    public async Task LocalActivity_Retention_Caps_To_2000_Newest()
+    {
+        using var client = _factory.CreateClient();
+
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name = "Retention Child" });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var createDoc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var childId = createDoc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(childId));
+
+        // Append 2050 events in chunks so request sizes remain reasonable.
+        var baseUtc = DateTimeOffset.UtcNow.AddHours(-1);
+        const int total = 2050;
+        const int chunk = 250;
+        for (var i = 0; i < total; i += chunk)
+        {
+            var list = new List<object>();
+            for (var j = 0; j < chunk && (i + j) < total; j++)
+            {
+                var n = i + j;
+                list.Add(new { eventId = Guid.NewGuid(), occurredAtUtc = baseUtc.AddSeconds(n), kind = "retention_test", seq = n });
+            }
+
+            var post = await client.PostAsJsonAsync($"/api/local/children/{childId}/activity", list);
+            Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+        }
+
+        var get = await client.GetAsync($"/api/local/children/{childId}/activity?take=2000");
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+
+        using var doc = JsonDocument.Parse(await get.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal(2000, data.GetArrayLength());
+
+        // Because newest-first, the highest seq should be first.
+        var firstSeq = data[0].TryGetProperty("seq", out var seqEl) ? seqEl.GetInt32() : -1;
+        Assert.True(firstSeq >= 2049);
     }
 
     [Fact]

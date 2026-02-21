@@ -33,11 +33,11 @@ Legend:
 | K-REQ-002 | Kid UX | Create/request exceptions (child → parent) | Win✅ | ✅ | Must remain working. |
 | K-LOC-001 | Agent | Geofence evaluation (inside/outside) | Win✅ | ✅ | PATCH_16U14 |
 | K-LOC-002 | Agent | Emit geofence enter/exit events | Win✅ | ✅ | Activity events consumed by Alerts (PATCH_16U15) |
-| K-TIME-001 | Agent | Time budget enforcement (daily minutes) | Win✅ | 🟡 | Surface exists; enforcement may be staged. |
-| K-TIME-002 | Agent | Grace minutes + warnings | Win✅ | 🟡 | PATCH_16R adds config; enforcement may be partial. |
-| K-APP-001 | Agent | App allow/deny list | Win✅ | 🟡 | Planned; not fully enforced. |
-| K-APP-002 | Agent | Per-app limits | Win✅ | 🟡 | PATCH_16S improves authoring; enforcement TBD. |
-| K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | 🟡 | PATCH_16T persists toggles; enforcement TBD. |
+| K-TIME-001 | Agent | Time budget enforcement (daily minutes) | Win✅ | 🟡 | Enforced via workstation lock + Kid UX blocked screen (best-effort). Hardening still planned for stricter modes. |
+| K-TIME-002 | Agent | Grace minutes + warnings | Win✅ | ✅ | Warnings emitted (activity) + Kid UX warning screen; grace/config accepted; tracker de-dupes thresholds. |
+| K-APP-001 | Agent | App allow/deny list | Win✅ | ✅ | Enforced (best-effort): deny list + allow list (foreground) + UnblockApp grants override. |
+| K-APP-002 | Agent | Per-app limits | Win✅ | ✅ | Enforced (best-effort foreground): per-app daily caps + deterministic UnblockApp request loop. |
+| K-WEB-001 | Agent | SafeSearch / Restricted mode enforcement | Win✅ | ✅ | WebFilterManager applies rules (hosts/local block) + UnblockSite grants + web_blocked activity + circumvention signals. |
 | K-ALERT-001 | Agent | Telemetry → Alerts/Activity pipeline | Win✅ | ✅ | Geofence activity verified; other signals planned. |
 | K-UX-001 | Kid UX | “Why am I blocked?” explanations + request path | Win✅ | ✅ | Implemented: `/blocked` uses calm language + request links; `/today` shows status/time. |
 | K-HEALTH-001 | Agent | Heartbeat / health reporting | Win✅ | 🟡 | Heartbeat is implemented; pairing hardening includes token revoke/expiry checks (16W20). Pairing deeplink handling is optional and planned for Kid UX (16W22 adds parent-side deeplink copy). Health enrichment remains ongoing. |
