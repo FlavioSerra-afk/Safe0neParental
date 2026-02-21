@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Safe0ne.Shared.Contracts;
 
@@ -15,50 +17,33 @@ public static class PolicyCacheStore
         int? PolicyVersion,
         DateTimeOffset? EffectiveAtUtc,
         JsonElement? PolicySurface,
-        ChildPolicy? PolicyV1);
+        ChildPolicy? PolicyV1,
+        // 26W09L: integrity check (best-effort). If present, Load validates it.
+        string? ChecksumSha256 = null);
 
-    public static PolicyCacheEntry? Load(ChildId childId)
+    public sealed record LoadResult(PolicyCacheEntry? Entry, bool IntegrityOk);
+
+    public static LoadResult Load(ChildId childId)
     {
         try
         {
             var path = CachePathFor(childId);
-            if (!File.Exists(path)) return null;
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<PolicyCacheEntry>(json, JsonDefaults.Options);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Load the cache with a lightweight integrity check.
-    /// Returns (entry, corrupt) where corrupt indicates the cache file existed but was unusable.
-    /// </summary>
-    public static (PolicyCacheEntry? Entry, bool Corrupt) LoadValidated(ChildId childId)
-    {
-        try
-        {
-            var path = CachePathFor(childId);
-            if (!File.Exists(path)) return (null, false);
-
+            if (!File.Exists(path)) return new LoadResult(null, true);
             var json = File.ReadAllText(path);
             var entry = JsonSerializer.Deserialize<PolicyCacheEntry>(json, JsonDefaults.Options);
+            if (entry is null) return new LoadResult(null, true);
 
-            // Integrity check: require at least one usable policy surface.
-            var hasSurface = entry?.PolicySurface is { } ps && ps.ValueKind == JsonValueKind.Object;
-            var hasV1 = entry?.PolicyV1 is not null;
-            if (!hasSurface && !hasV1)
-            {
-                return (null, true);
-            }
+            // If checksum is absent, treat as ok (backward compatible with older cache files).
+            if (string.IsNullOrWhiteSpace(entry.ChecksumSha256))
+                return new LoadResult(entry, true);
 
-            return (entry, false);
+            var expected = ComputeChecksumSha256(entry);
+            var ok = string.Equals(expected, entry.ChecksumSha256, StringComparison.OrdinalIgnoreCase);
+            return new LoadResult(ok ? entry : null, ok);
         }
         catch
         {
-            return (null, true);
+            return new LoadResult(null, false);
         }
     }
 
@@ -67,12 +52,36 @@ public static class PolicyCacheStore
         try
         {
             var path = CachePathFor(childId);
-            var json = JsonSerializer.Serialize(entry, JsonDefaults.Options);
+            // Rotate backup on each write so we can roll back if a new policy breaks enforcement.
+            TryRotateBackup(path);
+
+            var withChecksum = entry with
+            {
+                ChecksumSha256 = ComputeChecksumSha256(entry)
+            };
+
+            var json = JsonSerializer.Serialize(withChecksum, JsonDefaults.Options);
             File.WriteAllText(path, json);
         }
         catch
         {
             // best-effort
+        }
+    }
+
+    public static bool RestoreBackup(ChildId childId)
+    {
+        try
+        {
+            var path = CachePathFor(childId);
+            var bak = path + ".bak";
+            if (!File.Exists(bak)) return false;
+            File.Copy(bak, path, overwrite: true);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -87,6 +96,39 @@ public static class PolicyCacheStore
         {
             // best-effort
         }
+    }
+
+    private static void TryRotateBackup(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            File.Copy(path, path + ".bak", overwrite: true);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    private static string ComputeChecksumSha256(PolicyCacheEntry entry)
+    {
+        // Important: hash only the “content” fields, not the checksum itself.
+        // Keep this stable over time: if we add new fields, they must be included here
+        // (or we intentionally accept old checksum as absent).
+        var payload = new
+        {
+            entry.CachedAtUtc,
+            entry.PolicyVersion,
+            entry.EffectiveAtUtc,
+            PolicySurface = entry.PolicySurface,
+            entry.PolicyV1
+        };
+
+        var json = JsonSerializer.Serialize(payload, JsonDefaults.Options);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private static string CachePathFor(ChildId childId)

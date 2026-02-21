@@ -28,7 +28,7 @@ Legend:
 |---|---|---|---|---|---|
 | K-FOUND-001 | Foundation | Consume shared contracts (DTOs/enums) | Win✅ | ✅ | Shared contracts baseline. |
 | K-SSOT-001 | SSOT | Read policy + grants from Local Control Plane | Win✅ | ✅ | Required for request loop. |
-| K-POLSYNC-001 | Agent | Policy sync replay protection + apply ack (version/fingerprint) | Win✅ | 🟡 | 16W19: apply ack fields. 16W21: watchdog surfacing (server-side). 16W23: server recommends rollback + rollback endpoint (last-known-good snapshot). Integrity still planned. |
+| K-POLSYNC-001 | Agent | Policy sync replay protection + apply ack (version/fingerprint) | Win✅ | 🟢 | 16W19: apply ack fields. 16W21: watchdog surfacing (server-side). 16W23: rollback recommendation + endpoint. 26W09L: offline cache integrity check + best-effort rollback to last-known-good cache on apply failure. |
 | K-REQ-001 | Agent | Apply approved grants (time-boxed exceptions) | Win✅ | ✅ | “Request loop” baseline. |
 | K-REQ-002 | Kid UX | Create/request exceptions (child → parent) | Win✅ | ✅ | Must remain working. |
 | K-LOC-001 | Agent | Geofence evaluation (inside/outside) | Win✅ | ✅ | PATCH_16U14 |

@@ -119,7 +119,13 @@ public sealed record TamperSignals(
     int ConsecutiveHeartbeatFailures = 0,
     int ConsecutivePolicyFetchFailures = 0,
     bool AuthRejected = false,
-    DateTimeOffset? AuthRejectedAtUtc = null);
+    DateTimeOffset? AuthRejectedAtUtc = null,
+    // 26W09L: policy cache integrity + rollback observability (privacy-first)
+    bool PolicyCacheCorrupt = false,
+    DateTimeOffset? PolicyCacheCorruptAtUtc = null,
+    bool PolicyRollbackApplied = false,
+    DateTimeOffset? PolicyRollbackAtUtc = null,
+    string? PolicyRollbackReason = null);
 
 /// <summary>
 /// Child Agent -> Control Plane heartbeat.

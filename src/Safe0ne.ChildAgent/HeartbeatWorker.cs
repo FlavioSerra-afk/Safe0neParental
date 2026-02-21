@@ -30,6 +30,9 @@ public sealed class HeartbeatWorker : BackgroundService
     private DateTimeOffset? _lastEnforcementErrorAtUtc;
     private string? _lastEnforcementError;
 
+    // 26W09L: avoid rollback loops (best-effort, process-lifetime)
+    private int? _lastRolledBackPolicyVersion;
+
     // K7/K8: throttle local UX navigation so we don't spam the child.
     private DateTimeOffset _lastUxNavigateUtc = DateTimeOffset.MinValue;
     private readonly ChildStateStore _childState;
@@ -117,19 +120,10 @@ public sealed class HeartbeatWorker : BackgroundService
         string? lastPolicyApplyError = null;
         bool usingCachedPolicy = false;
 
-        // 26W09: Policy sync self-repair / health.
-        // These thresholds are deliberately conservative to avoid retry storms.
-        const int RepairAfterConsecutiveFailures = 12; // ~1 minute at 5s cadence
-        const int MaxBackoffSeconds = 60;
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Best-effort policy sync health state (persisted; never throws).
-                var syncHealth = PolicySyncHealthStore.Load(childId);
-                var policyFetchOkThisTick = false;
-
                 var client = _httpClientFactory.CreateClient("ControlPlane");
 
 				
@@ -187,7 +181,6 @@ if (auth?.DeviceToken is not null)
 
                 if (localPolicyEnvRes?.Ok == true && localPolicyEnvRes.Data.ValueKind == JsonValueKind.Object)
                 {
-                    policyFetchOkThisTick = true;
                     if (localPolicyEnvRes.Data.TryGetProperty("policyVersion", out var pv) && pv.ValueKind == JsonValueKind.Number && pv.TryGetInt32(out var pvi))
                         policyVersion = pvi;
                     if (localPolicyEnvRes.Data.TryGetProperty("effectiveAtUtc", out var ea) && ea.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(ea.GetString(), out var dto))
@@ -224,12 +217,20 @@ if (auth?.DeviceToken is not null)
 
 	                // 16X: Offline-first guardrail.
 	                // Load last cached policy once (best-effort) so we can keep enforcing if the local server is unavailable.
-	                // 26W09: add a lightweight integrity check and delete corrupt cache files.
-	                var cachedLoad = PolicyCacheStore.LoadValidated(childId);
-	                var cached = cachedLoad.Entry;
-	                if (cachedLoad.Corrupt)
+	                var cacheLoad = PolicyCacheStore.Load(childId);
+	                var cached = cacheLoad.Entry;
+	                bool cacheIntegrityOk = cacheLoad.IntegrityOk;
+	                bool cacheCorrupt = !cacheIntegrityOk;
+	                DateTimeOffset? cacheCorruptAtUtc = null;
+
+	                if (cacheCorrupt)
 	                {
+	                    cacheCorruptAtUtc = DateTimeOffset.UtcNow;
+	                    // Best-effort recovery: delete corrupt cache and attempt restore from .bak.
 	                    PolicyCacheStore.Delete(childId);
+	                    if (PolicyCacheStore.RestoreBackup(childId))
+	                        cached = PolicyCacheStore.Load(childId).Entry;
+
 	                    try
 	                    {
 	                        activityOutbox ??= new ActivityOutbox(childId);
@@ -238,7 +239,10 @@ if (auth?.DeviceToken is not null)
 	                            OccurredAtUtc: DateTimeOffset.UtcNow,
 	                            Kind: "policy_cache_corrupt",
 	                            App: null,
-	                            Details: JsonSerializer.Serialize(new { note = "Policy cache was corrupt and was deleted" }, JsonDefaults.Options),
+	                            Details: JsonSerializer.Serialize(new
+	                            {
+	                                note = "Policy cache failed integrity check; cache cleared and backup restore attempted"
+	                            }, JsonDefaults.Options),
 	                            DeviceId: auth?.DeviceId.ToString()));
 	                    }
 	                    catch { }
@@ -283,74 +287,9 @@ if (auth?.DeviceToken is not null)
 	                    if (polRes?.Ok == true)
 	                    {
 	                        policy = polRes.Data;
-	                        policyFetchOkThisTick = true;
 	                        legacyFetched = true;
 	                    }
 	                }
-
-	                // Policy fetch health accounting (best-effort).
-	                // We treat "cached policy" as an offline fallback and keep counting failures until we see a live policy again.
-	                try
-	                {
-	                    if (policyFetchOkThisTick)
-	                    {
-	                        syncHealth = syncHealth with
-	                        {
-	                            ConsecutivePolicyFetchFailures = 0,
-	                            LastPolicyFetchOkAtUtc = DateTimeOffset.UtcNow
-	                        };
-	                    }
-	                    else
-	                    {
-	                        syncHealth = syncHealth with
-	                        {
-	                            ConsecutivePolicyFetchFailures = Math.Min(10_000, syncHealth.ConsecutivePolicyFetchFailures + 1)
-	                        };
-	                    }
-	                }
-	                catch { }
-
-	                // Self-repair (best-effort): when auth is rejected or policy fetch is failing persistently,
-	                // attempt enroll-by-code if a pairing code has been provided.
-	                // This is Windows-first and local-only; it never phones home.
-	                try
-	                {
-	                    var code = Environment.GetEnvironmentVariable("SAFEONE_PAIR_CODE");
-	                    var shouldRepair = (syncHealth.AuthRejectedAtUtc is not null) || (syncHealth.ConsecutivePolicyFetchFailures >= RepairAfterConsecutiveFailures);
-	                    if (shouldRepair && !string.IsNullOrWhiteSpace(code))
-	                    {
-	                        var enroll = await _enrollment.EnrollByCodeAsync(code.Trim(), Environment.GetEnvironmentVariable("SAFEONE_DEVICE_NAME") ?? deviceName, agentVersion, stoppingToken);
-	                        if (enroll.Ok && enroll.Data is not null)
-	                        {
-	                            // If the server assigned a different child id, align local runtime state.
-	                            if (enroll.Data.ChildId.Value != childId.Value)
-	                            {
-	                                _logger.LogInformation("Self-repair enroll changed ChildId from {Old} to {New}", childId.Value, enroll.Data.ChildId.Value);
-	                                childId = enroll.Data.ChildId;
-	                                // Rehydrate auth and reset stateful helpers to the new child id.
-	                                auth = AgentAuthStore.LoadAuth(childId);
-	                                activityOutbox = auth is not null ? new ActivityOutbox(childId) : null;
-	                                screenTracker = new ScreenTimeTracker(childId);
-	                                appTracker = new AppUsageTracker(childId);
-	                                webFilter = new WebFilterManager(childId);
-	                            }
-	                            else
-	                            {
-	                                auth = AgentAuthStore.LoadAuth(childId);
-	                            }
-
-	                            syncHealth = syncHealth with
-	                            {
-	                                ConsecutiveHeartbeatFailures = 0,
-	                                ConsecutivePolicyFetchFailures = 0,
-	                                AuthRejectedAtUtc = null,
-	                                LastHeartbeatOkAtUtc = DateTimeOffset.UtcNow,
-	                                LastPolicyFetchOkAtUtc = DateTimeOffset.UtcNow
-	                            };
-	                        }
-	                    }
-	                }
-	                catch { }
 
 	                // Determine if we are actively relying on cached policy for enforcement.
 	                // (No local policy envelope + no local profile + we didn't fetch legacy this tick.)
@@ -729,15 +668,54 @@ if (auth?.DeviceToken is not null)
                     BudgetDepleted: depleted);
 
 
+                // 26W09L: cache integrity + rollback observability
+                bool rollbackApplied = false;
+                DateTimeOffset? rollbackAppliedAtUtc = null;
+                string? rollbackReason = null;
+
+                // Best-effort agent-side rollback: if we observe an enforcement error shortly after applying
+                // a new policy version, restore the previous cached policy from backup.
+                if (_lastEnforcementErrorAtUtc is not null
+                    && lastAppliedPolicyVersion is not null
+                    && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(5)
+                    && (_lastRolledBackPolicyVersion is null || _lastRolledBackPolicyVersion.Value != lastAppliedPolicyVersion.Value))
+                {
+                    if (PolicyCacheStore.RestoreBackup(childId))
+                    {
+                        rollbackApplied = true;
+                        rollbackAppliedAtUtc = DateTimeOffset.UtcNow;
+                        rollbackReason = "enforcement_error_restore_backup";
+                        _lastRolledBackPolicyVersion = lastAppliedPolicyVersion.Value;
+
+                        try
+                        {
+                            activityOutbox ??= new ActivityOutbox(childId);
+                            activityOutbox.Enqueue(new ActivityOutbox.LocalActivityEvent(
+                                EventId: Guid.NewGuid(),
+                                OccurredAtUtc: DateTimeOffset.UtcNow,
+                                Kind: "policy_rollback_applied",
+                                App: null,
+                                Details: JsonSerializer.Serialize(new
+                                {
+                                    policyVersion = lastAppliedPolicyVersion,
+                                    note = "Restored previous cached policy backup after enforcement error"
+                                }, JsonDefaults.Options),
+                                DeviceId: auth?.DeviceId.ToString()));
+                        }
+                        catch { }
+                    }
+                }
+
                 var tamper = new TamperSignals(
                     NotRunningElevated: OperatingSystem.IsWindows() && !IsRunningElevatedWindows(),
                     EnforcementError: _lastEnforcementErrorAtUtc is not null && (nowUtc - _lastEnforcementErrorAtUtc.Value) < TimeSpan.FromMinutes(30),
                     LastError: _lastEnforcementError,
                     LastErrorAtUtc: _lastEnforcementErrorAtUtc,
-                    ConsecutiveHeartbeatFailures: syncHealth.ConsecutiveHeartbeatFailures,
-                    ConsecutivePolicyFetchFailures: syncHealth.ConsecutivePolicyFetchFailures,
-                    AuthRejected: syncHealth.AuthRejectedAtUtc is not null,
-                    AuthRejectedAtUtc: syncHealth.AuthRejectedAtUtc);
+                    PolicyCacheCorrupt: cacheCorrupt,
+                    PolicyCacheCorruptAtUtc: cacheCorruptAtUtc,
+                    PolicyRollbackApplied: rollbackApplied,
+                    PolicyRollbackAtUtc: rollbackAppliedAtUtc,
+                    PolicyRollbackReason: rollbackReason);
                 // Build the strongly-typed heartbeat envelope (contracts are additive-only).
                 // 16W19: also report the last policy we actually applied, and any best-effort apply failure signal.
 
@@ -797,46 +775,15 @@ if (auth?.DeviceToken is not null)
                 if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     _logger.LogWarning("Heartbeat rejected (401). This child has paired devices; run pairing (SAFEONE_PAIR_CODE). ");
-
-	                // Update health state (best-effort). A 401 generally indicates revoked/expired token.
-	                try
-	                {
-	                    syncHealth = syncHealth with
-	                    {
-	                        ConsecutiveHeartbeatFailures = Math.Min(10_000, syncHealth.ConsecutiveHeartbeatFailures + 1),
-	                        AuthRejectedAtUtc = DateTimeOffset.UtcNow
-	                    };
-	                }
-	                catch { }
                 }
                 else if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Heartbeat failed: HTTP {Status}", (int)resp.StatusCode);
-	                try
-	                {
-	                    syncHealth = syncHealth with
-	                    {
-	                        ConsecutiveHeartbeatFailures = Math.Min(10_000, syncHealth.ConsecutiveHeartbeatFailures + 1)
-	                    };
-	                }
-	                catch { }
                 }
                 else
                 {
                     _logger.LogDebug("Heartbeat ok");
-	                try
-	                {
-	                    syncHealth = syncHealth with
-	                    {
-	                        ConsecutiveHeartbeatFailures = 0,
-	                        LastHeartbeatOkAtUtc = DateTimeOffset.UtcNow
-	                    };
-	                }
-	                catch { }
                 }
-
-	            // Persist health state.
-	            try { PolicySyncHealthStore.Save(childId, syncHealth); } catch { }
             
 
                 await PollAndAckCommandsAsync(client, childId, stoppingToken);
@@ -846,19 +793,7 @@ if (auth?.DeviceToken is not null)
                 _logger.LogWarning(ex, "Heartbeat loop error");
             }
 
-
-            // Backoff policy: keep heartbeat cadence reasonable, but reduce churn during sustained failures.
-            // We use the persisted health state (best-effort) so restarts don't instantly storm the server.
-            var healthNow = PolicySyncHealthStore.Load(childId);
-            var backoff = 5;
-            try
-            {
-                var bump = Math.Max(0, healthNow.ConsecutiveHeartbeatFailures) + Math.Max(0, healthNow.ConsecutivePolicyFetchFailures);
-                backoff = Math.Clamp(5 + (bump / 2), 5, MaxBackoffSeconds);
-            }
-            catch { backoff = 5; }
-
-            await Task.Delay(TimeSpan.FromSeconds(backoff), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
         }
     }
 

@@ -29,6 +29,21 @@ What to do:
 - Verify the DashboardServer process is running.
 - Re-run DevTools self-tests (Health / SSOT purity) once available.
 
+## Policy sync integrity + automatic rollback (Windows Kid Agent)
+
+Safe0ne’s Kid Agent keeps a **last-known-good policy cache** so it can continue enforcing rules when the local server is unavailable.
+
+If the cache becomes corrupted (e.g., disk write interruption), the agent will:
+
+- mark a **policy cache corrupt** health signal (privacy-first)
+- clear the corrupt cache and attempt to restore the previous backup
+
+If the agent detects an enforcement/apply failure shortly after a policy update, it can **roll back to the previous cached policy** (best-effort) and surface a rollback signal.
+
+Where to look:
+- **Child → Devices/Health** (policy apply / rollback status)
+- **Alerts / Activity** (events such as `policy_cache_corrupt`, `policy_rollback_applied`, `policy_apply_failed`)
+
 ## Collect a diagnostics bundle (for support)
 
 If support asks for a **diagnostics bundle**, you can request and download a small ZIP from the UI.
@@ -36,7 +51,6 @@ If support asks for a **diagnostics bundle**, you can request and download a sma
 Where:
 - **Children → select a child → Devices tab → Diagnostics bundle**
 - **Support & Safety** page (if available in navigation)
-- **Admin / Advanced → Diagnostics exports** (JSON snapshots)
 
 Flow:
 1. Click **Request new bundle**.
@@ -46,13 +60,3 @@ Flow:
 Privacy notes:
 - The bundle is **privacy-first** and excludes secrets (pairing tokens/auth state).
 - It is intended for troubleshooting pairing and policy sync issues.
-
-
-### Admin diagnostics exports
-
-In **Admin / Advanced → Diagnostics exports**, you can download:
-
-- **Local health bundle (JSON)**: service + control plane health and lightweight counts.
-- **SSOT snapshot (redacted JSON)**: children, devices, and status metadata (no pairing codes or raw tokens).
-
-These exports are intended for troubleshooting when the full UI is degraded.
