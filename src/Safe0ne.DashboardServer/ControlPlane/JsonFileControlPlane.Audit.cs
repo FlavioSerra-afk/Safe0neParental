@@ -18,8 +18,38 @@ public sealed partial class JsonFileControlPlane
     /// </summary>
     public AuditLogEnvelope GetLocalAuditLog(ChildId childId, int take)
     {
+        return QueryLocalAuditLog(childId,
+            take: take,
+            fromUtc: null,
+            toUtc: null,
+            actorContains: null,
+            actionContains: null,
+            scopeContains: null,
+            q: null);
+    }
+
+    /// <summary>
+    /// Query audit entries with best-effort filtering (newest-first in response).
+    /// Intended for UI polish and diagnostics exports.
+    /// </summary>
+    public AuditLogEnvelope QueryLocalAuditLog(
+        ChildId childId,
+        int take,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        string? actorContains,
+        string? actionContains,
+        string? scopeContains,
+        string? q)
+    {
         if (take <= 0) take = 200;
         if (take > 1000) take = 1000;
+
+        static bool ContainsCi(string haystack, string? needle)
+        {
+            if (string.IsNullOrWhiteSpace(needle)) return true;
+            return (haystack ?? string.Empty).IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
 
         lock (_gate)
         {
@@ -32,15 +62,67 @@ public sealed partial class JsonFileControlPlane
             try
             {
                 var entries = JsonSerializer.Deserialize<List<AuditEntry>>(json, JsonDefaults.Options) ?? new List<AuditEntry>();
-                var slice = entries
+
+                var filtered = entries
+                    .Where(e => fromUtc is null || e.OccurredAtUtc >= fromUtc.Value)
+                    .Where(e => toUtc is null || e.OccurredAtUtc <= toUtc.Value)
+                    .Where(e => ContainsCi(e.Actor, actorContains))
+                    .Where(e => ContainsCi(e.Action, actionContains))
+                    .Where(e => ContainsCi(e.Scope, scopeContains));
+
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    filtered = filtered.Where(e =>
+                        ContainsCi(e.Actor, q) ||
+                        ContainsCi(e.Action, q) ||
+                        ContainsCi(e.Scope, q) ||
+                        ContainsCi(e.BeforeHashSha256 ?? string.Empty, q) ||
+                        ContainsCi(e.AfterHashSha256 ?? string.Empty, q));
+                }
+
+                var slice = filtered
                     .OrderByDescending(e => e.OccurredAtUtc)
                     .Take(take)
                     .ToList();
+
                 return new AuditLogEnvelope(key, slice);
             }
             catch
             {
                 return new AuditLogEnvelope(key, Array.Empty<AuditEntry>());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Purge audit entries older than the given UTC threshold (best-effort).
+    /// Returns the number of deleted entries.
+    /// </summary>
+    public int PurgeLocalAuditEntriesOlderThan(ChildId childId, DateTimeOffset olderThanUtc)
+    {
+        lock (_gate)
+        {
+            var key = childId.Value.ToString();
+            if (!_localAuditEntriesJsonByChildGuid.TryGetValue(key, out var json) || string.IsNullOrWhiteSpace(json))
+                return 0;
+
+            try
+            {
+                var entries = JsonSerializer.Deserialize<List<AuditEntry>>(json, JsonDefaults.Options) ?? new List<AuditEntry>();
+                var before = entries.Count;
+
+                // Keep entries at/after threshold.
+                entries = entries.Where(e => e.OccurredAtUtc >= olderThanUtc).ToList();
+                var after = entries.Count;
+
+                _localAuditEntriesJsonByChildGuid[key] = JsonSerializer.Serialize(entries, JsonDefaults.Options);
+                PersistUnsafe_NoLock();
+
+                return Math.Max(0, before - after);
+            }
+            catch
+            {
+                return 0;
             }
         }
     }

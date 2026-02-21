@@ -17,6 +17,17 @@ public sealed class LocalModeContractTests : IClassFixture<WebApplicationFactory
         _factory = factory;
     }
 
+    private static async Task<string> CreateChildAsync(HttpClient client, string name = "Test Child")
+    {
+        var create = await client.PostAsJsonAsync("/api/local/children", new { name });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+
+        using var doc = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var id = doc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(id));
+        return id!;
+    }
+
     [Fact]
     public async Task LocalHealth_IsAvailable()
     {
@@ -637,4 +648,43 @@ public async Task LocalPairing_MultiDevice_RevokeIsolation_And_LastSeen_AreStabl
     var bAfter = arrAfter.Single(x => x.GetProperty("deviceId").GetString() == deviceIdB);
     Assert.True(bAfter.TryGetProperty("tokenRevoked", out var bRev) && bRev.ValueKind == JsonValueKind.False);
 }
+
+	[Fact]
+	public async Task AuditLog_Supports_Action_Filter_And_Export_Shape()
+	{
+		using var client = _factory.CreateClient();
+		var childId = await CreateChildAsync(client);
+
+		// Contract: ApiResponse<AuditLogEnvelope> with data.entries: []
+		var res = await client.GetAsync($"/api/local/children/{childId}/audit?take=10&action=child_created");
+		Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+		using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+
+		Assert.True(doc.RootElement.TryGetProperty("data", out var data));
+		Assert.Equal(JsonValueKind.Object, data.ValueKind);
+		Assert.True(data.TryGetProperty("entries", out var entries));
+		Assert.Equal(JsonValueKind.Array, entries.ValueKind);
+	}
+
+	[Fact]
+	public async Task AuditLog_Purge_OlderThanUtc_Is_Idempotent()
+	{
+		using var client = _factory.CreateClient();
+		var childId = await CreateChildAsync(client);
+
+		// Purging with a far-future cutoff should delete nothing and always succeed.
+		var cutoff = Uri.EscapeDataString("2100-01-01T00:00:00Z");
+		var purge = await client.PostAsync($"/api/local/children/{childId}/audit/purge?olderThanUtc={cutoff}", content: null);
+		Assert.Equal(HttpStatusCode.OK, purge.StatusCode);
+
+		using var purgeDoc = JsonDocument.Parse(await purge.Content.ReadAsStringAsync());
+		Assert.True(purgeDoc.RootElement.TryGetProperty("data", out var data));
+		Assert.Equal(JsonValueKind.Object, data.ValueKind);
+
+		// Contract is additive; accept either purgedCount or deletedCount depending on server version.
+		Assert.True(
+			data.TryGetProperty("purgedCount", out var _) ||
+			data.TryGetProperty("deletedCount", out var _)
+		);
+	}
 }

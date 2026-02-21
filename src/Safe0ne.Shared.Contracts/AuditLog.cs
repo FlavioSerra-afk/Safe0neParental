@@ -22,3 +22,12 @@ public sealed record AuditEntry(
 public sealed record AuditLogEnvelope(
     string ChildId,
     IReadOnlyList<AuditEntry> Entries);
+
+/// <summary>
+/// Response for local audit retention/purge operations.
+/// Additive-only: used by local endpoints and UI tooling.
+/// </summary>
+public sealed record AuditPurgeResponse(
+    string ChildId,
+    DateTimeOffset OlderThanUtc,
+    int DeletedCount);

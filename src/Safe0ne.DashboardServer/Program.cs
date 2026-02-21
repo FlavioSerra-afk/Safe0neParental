@@ -1835,8 +1835,47 @@ local.MapGet("/children/{childId:guid}/audit", (HttpRequest req, Guid childId, J
     var take = 200;
     if (req.Query.TryGetValue("take", out var t) && int.TryParse(t.ToString(), out var n)) take = n;
 
-    var env = cp.GetLocalAuditLog(new ChildId(childId), take);
+    DateTimeOffset? fromUtc = null;
+    if (req.Query.TryGetValue("from", out var f) && DateTimeOffset.TryParse(f.ToString(), out var fromVal)) fromUtc = fromVal;
+
+    DateTimeOffset? toUtc = null;
+    if (req.Query.TryGetValue("to", out var to) && DateTimeOffset.TryParse(to.ToString(), out var toVal)) toUtc = toVal;
+
+    string? actor = null;
+    if (req.Query.TryGetValue("actor", out var a)) actor = a.ToString();
+    string? action = null;
+    if (req.Query.TryGetValue("action", out var ac)) action = ac.ToString();
+    string? scope = null;
+    if (req.Query.TryGetValue("scope", out var sc)) scope = sc.ToString();
+    string? q = null;
+    if (req.Query.TryGetValue("q", out var qq)) q = qq.ToString();
+
+    var env = cp.QueryLocalAuditLog(new ChildId(childId), take, fromUtc, toUtc, actor, action, scope, q);
     return Results.Json(new ApiResponse<AuditLogEnvelope>(env, null), JsonDefaults.Options);
+});
+
+// EPIC-AUDIT-VIEWER-POLISH: purge old local audit entries (Local Mode)
+// Example: POST /api/local/children/{id}/audit/purge?olderThanUtc=2100-01-01T00:00:00Z
+local.MapPost("/children/{childId:guid}/audit/purge", (HttpRequest req, Guid childId, JsonFileControlPlane cp) =>
+{
+    // Prefer explicit UTC timestamp for deterministic behavior.
+    DateTimeOffset olderThanUtc;
+    if (req.Query.TryGetValue("olderThanUtc", out var o) && DateTimeOffset.TryParse(o.ToString(), out var parsed))
+    {
+        olderThanUtc = parsed;
+    }
+    else
+    {
+        var days = 30;
+        if (req.Query.TryGetValue("olderThanDays", out var d) && int.TryParse(d.ToString(), out var di)) days = di;
+        if (days < 0) days = 0;
+        if (days > 3650) days = 3650;
+        olderThanUtc = DateTimeOffset.UtcNow.AddDays(-days);
+    }
+
+    var deleted = cp.PurgeLocalAuditEntriesOlderThan(new ChildId(childId), olderThanUtc);
+    var resp = new AuditPurgeResponse(childId.ToString(), olderThanUtc, deleted);
+    return Results.Json(new ApiResponse<AuditPurgeResponse>(resp, null), JsonDefaults.Options);
 });
 
 

@@ -74,8 +74,22 @@ const Safe0neApi = {
   async getChildAuditLocal(childId, opts){
     const params = [];
     if (opts && opts.take) params.push(`take=${encodeURIComponent(opts.take)}`);
+    if (opts && opts.from) params.push(`from=${encodeURIComponent(opts.from)}`);
+    if (opts && opts.to) params.push(`to=${encodeURIComponent(opts.to)}`);
+    if (opts && opts.actor) params.push(`actor=${encodeURIComponent(opts.actor)}`);
+    if (opts && opts.action) params.push(`action=${encodeURIComponent(opts.action)}`);
+    if (opts && opts.scope) params.push(`scope=${encodeURIComponent(opts.scope)}`);
+    if (opts && opts.q) params.push(`q=${encodeURIComponent(opts.q)}`);
     const qs = params.length ? `?${params.join("&")}` : "";
     return await _get(`/api/local/children/${encodeURIComponent(childId)}/audit${qs}`);
+  },
+
+  async purgeChildAuditLocal(childId, opts){
+    const params = [];
+    if (opts && opts.olderThanUtc) params.push(`olderThanUtc=${encodeURIComponent(opts.olderThanUtc)}`);
+    if (opts && opts.olderThanDays != null) params.push(`olderThanDays=${encodeURIComponent(opts.olderThanDays)}`);
+    const qs = params.length ? `?${params.join("&")}` : "";
+    return await _post(`/api/local/children/${encodeURIComponent(childId)}/audit/purge${qs}`, null);
   },
 
   // Local Mode: Location (last known)
