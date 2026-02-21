@@ -235,9 +235,7 @@ Every shim must be listed in `/Docs/00_Shared/Legacy-Code-Registry.md`.
 ---
 
 ## Patch log
+- 26W08: EPIC-DEVICE-HEALTH-DEEP-PANEL: per-device lastSeen + token lifecycle surfaced in Devices tab + docs update
 
 - 16W29: EPIC-ACTIVITY moved to 🟢 (UI Export button wired to Local API export envelope; retention already enforced in SSOT).
 - 26W08: Diagnostics bundles surfaced per-child (Devices tab) + troubleshooting doc updated.
-
-
-- 26W08: FIX — /api/v1/children/{id}/status returns 200 not_seen (avoid WebView console 404 spam)

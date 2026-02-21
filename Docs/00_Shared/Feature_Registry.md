@@ -45,7 +45,7 @@ This document is the **single source of truth** for tracking feature delivery st
 | EPIC-ENFORCE-SCREENTIME | Kid Agent | Enforcement: budgets/schedules/modes | 🟡 | Kid agent + block screens | SSOT: policy enforcement state | Config exists; enforcement partial |
 | EPIC-ENFORCE-APPS | Kid Agent | Enforcement: app allow/deny + per-app limits + install approvals | 🟡 | Kid agent | SSOT: app rules + grants | Authoring exists; enforcement TBD |
 | EPIC-ENFORCE-WEB | Kid Agent | Enforcement: categories + adult toggle + circumvention detection | 🟡 | Kid agent + alerts | SSOT: web rules + events | Toggles exist; enforcement TBD |
-| EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🟡 | Kid UX | `/today` shows pairing + policy version/updated + screen-time + next schedule; `/blocked` unifies reasons (time/app/web/schedule) + shows clear CTA to request access; `/emergency` shows emergency help + always-allowed essentials. Emergency contacts still planned. | Evidence: `src/Safe0ne.ChildAgent/ChildUx/ChildUxServer.cs`, `src/Safe0ne.ChildAgent/ChildUx/ChildStateStore.cs` |
+| EPIC-CHILD-UX | Kid UX | Child-facing “Today” + block screens + emergency access | 🟡 | Kid UX | `/today` shows pairing + policy version/updated + screen-time + next schedule; `/blocked` explains why + links to request; `/emergency` shows emergency help + always-allowed essentials. Emergency contacts still planned. | Evidence: `src/Safe0ne.ChildAgent/ChildUx/ChildUxServer.cs`, `src/Safe0ne.ChildAgent/ChildUx/ChildStateStore.cs` |
 | EPIC-ACTIVITY | Telemetry | Activity capture + retention + export | 🔴 | Kid agent + Parent reports | SSOT: activity logs + retention policy | Planned in KFT-034+ |
 | EPIC-ANTITAMPER | Resilience | Anti-tamper + fail-closed + self-repair | 🟡 | Parent: tamper/circumvention surfaces; Alerts inbox items | SSOT: heartbeat tamper/circumvention signals + activity | 16W15–16W17: signals surfaced + alerts + policy gates |
 | EPIC-AUDIT | Parent | Audit log viewer (append-only policy changes) | 🟢 | Admin→Audit Log loads from SSOT; policy PUT/PATCH and device token revoke append entries | SSOT: append-only audit | 26W08: implemented SSOT-backed audit stream + endpoint; expand filters/export later |
@@ -57,3 +57,14 @@ This document is the **single source of truth** for tracking feature delivery st
 4. Ensure marker/self-tests remain green.
 
 - 🟡 ENG: ControlPlane partial split — extracted Policy domain to JsonFileControlPlane.Policy.cs (seed)
+
+
+### EPIC-DEVICE-HEALTH-DEEP-PANEL (Windows-first)
+- Status: 🟢 Implemented
+- Evidence:
+  - UI: `src/Safe0ne.DashboardServer/wwwroot/app/features/children.js` (Child → Devices tab → “Device health (deep)”).
+  - Uses existing endpoints:
+    - `/api/v1/children/{childId}/devices`
+    - `/api/v1/children/{childId}/status`
+    - Diagnostics history via Support page.
+- Notes: Per-device lastSeen + token lifecycle are surfaced; revoke/unpair actions remain per device.

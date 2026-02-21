@@ -589,6 +589,59 @@ function renderDevicesTab(child) {
     })
     .join("");
 
+
+  // Device health deep panel (per-device). Windows-first: parents often manage multiple devices per child.
+  const deepRows = (Array.isArray(devices) && devices.length ? devices : [])
+    .map((d) => {
+      const devId = String(d?.deviceId ?? d?.id ?? "");
+      const name = String(d?.deviceName ?? d?.name ?? "Device");
+      const enrolledAt = d?.enrolledAtUtc ? new Date(d.enrolledAtUtc).toLocaleString()
+        : (d?.createdAtUtc ? new Date(d.createdAtUtc).toLocaleString() : "—");
+      const lastSeen = d?.lastSeenUtc ? new Date(d.lastSeenUtc).toLocaleString()
+        : (d?.lastSeen ? String(d.lastSeen) : "—");
+      const revokedAt = d?.tokenRevokedAtUtc ? new Date(d.tokenRevokedAtUtc).toLocaleString() : null;
+      const expiresAt = d?.tokenExpiresAtUtc ? new Date(d.tokenExpiresAtUtc).toLocaleString() : null;
+      const tokenState = revokedAt ? "Revoked"
+        : (expiresAt && (new Date(d.tokenExpiresAtUtc)).getTime() <= Date.now() ? "Expired"
+        : (devId ? "Active" : "Not paired"));
+      const meta = [
+        devId ? `ID: ${devId}` : null,
+        enrolledAt ? `Enrolled: ${enrolledAt}` : null,
+        lastSeen ? `Last seen: ${lastSeen}` : null,
+        revokedAt ? `Revoked: ${revokedAt}` : null,
+        expiresAt ? `Token expires: ${expiresAt}` : null,
+        d?.tokenIssuedAtUtc ? `Issued: ${new Date(d.tokenIssuedAtUtc).toLocaleString()}` : null,
+      ].filter(Boolean).join(" • ");
+
+      return `
+        <div style="padding:12px;border:1px solid rgba(148,163,184,.25);border-radius:14px;background:#fff;display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;">
+          <div style="min-width:240px;flex:1;">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <div style="font-weight:900;">${escapeHtml(name)}</div>
+              <span class="so-pill">${escapeHtml(tokenState)}</span>
+            </div>
+            <div class="so-card-sub" style="margin-top:6px;">${escapeHtml(meta || "—")}</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            ${useApi && devId ? `<button class="so-btn" data-action="revokeDeviceToken" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Revoke token</button>` : ""}
+            ${useApi && devId ? `<button class="so-btn so-btn-danger" data-action="unpairDevice" data-deviceid="${escapeHtml(devId)}" data-childid="${escapeHtml(id)}" type="button">Unpair</button>` : ""}
+            ${useApi ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="#/support?child=${encodeURIComponent(id)}">Open Support</a>` : ""}
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  const deepPanel = `
+      <div class="card" style="margin-top:12px;background:#fff;border:1px solid rgba(148,163,184,.25);">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+          <div style="font-weight:900;">Device health (deep)</div>
+          <div class="so-card-sub">Per-device last-seen + token lifecycle (Windows-first)</div>
+        </div>
+        <div class="so-card-sub" style="margin-top:8px;">Tip: if a device has never checked in, it will show <strong>Not paired</strong> / <strong>Never seen</strong>.</div>
+        <div style="margin-top:10px;display:grid;gap:10px;">${deepRows || `<div class="so-card-sub">No devices yet.</div>`}</div>
+      </div>`;
+
+
   // Pairing deep link is optional polish. It does not replace code-based pairing.
   const pairingCode = (pairing && pairing.pairingCode) ? String(pairing.pairingCode) : "";
   const pairingDeepLink = (pairingCode && isGuid(id))
@@ -653,7 +706,6 @@ function renderDevicesTab(child) {
             </div>
             <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="so-btn" data-action="requestDiagnosticsBundle" data-childid="${escapeHtml(id)}" type="button">Request new bundle</button>
-              <a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="#/support?child=${encodeURIComponent(id)}">History</a>
               ${has ? `<a class="so-btn" style="text-decoration:none;display:inline-flex;align-items:center;" href="${escapeHtml(dl)}" download>Download ZIP</a>` : `<button class="so-btn" data-action="noop" type="button" disabled>Download ZIP</button>`}
             </div>
             <div class="so-card-sub" style="margin-top:8px;">Tip: the Kid device must be online to upload the bundle after you request it.</div>
@@ -675,6 +727,8 @@ function renderDevicesTab(child) {
         <div class="tr th"><div>Device</div><div>Status</div><div>Last seen</div><div></div></div>
         ${rows}
       </div>
+
+      ${deepPanel}
     </div>`;
 }
 
@@ -1773,6 +1827,12 @@ if (state?.api?.available && isGuid(id) && !state.statusLoaded?.[id]) {
                   ? profile.policy.timeBudget.warnMinutesRemaining.join(",")
                   : "5,1")
             )}"/>
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <span style="color:#64748b;font-size:12px">Presets:</span>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="5,1" title="Classic">5,1</button>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="10,5,1" title="Gentle">10,5,1</button>
+              <button class="so-btn" type="button" data-action="setWarnPreset" data-value="15,10,5,1" title="More warnings">15,10,5,1</button>
+            </div>
             <div style="margin-top:6px;color:#64748b;font-size:12px;">Comma-separated minutes before limit (e.g., 10,5,1). Defaults to 5,1.</div>
           </div>
 
@@ -2449,6 +2509,15 @@ async function refreshPairingFromApi(childId) {
         return;
       }
       if (action === "noop") { ev.preventDefault(); return; }
+
+      if (action === "setWarnPreset") {
+        ev.preventDefault();
+        const v = btn.getAttribute("data-value") || "5,1";
+        const input = document.querySelector('input[data-field="warnAtMinutes"]');
+        if (input) input.value = v;
+        window.Safe0neUi?.toast?.("Updated", `Warnings preset set to ${v}.`);
+        return;
+      }
 
 
 if (action === "copyPairCode") {
